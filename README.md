@@ -40,8 +40,8 @@ Until merged, HA shows a generic placeholder; functionality is unaffected.
   [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy/)
   (needs an *active‑connection* capable proxy).
 - A genuine, **activated** D.A.R.S. receiver (M5Stack Unit C6L or XIAO ESP32‑C5)
-  running current firmware. Activate at
-  [getdars.com/installer](https://getdars.com/installer).
+  running current firmware. Get at
+  [getdars.com](https://getdars.com/).
 
 ## Install (HACS)
 
