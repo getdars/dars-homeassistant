@@ -160,6 +160,7 @@ class DarsMapCard extends HTMLElement {
     this._hass = hass;
     if (!this._built) this._build();
     this._update();
+    this._updateConn();   // live receiver-connection dot (independent of live/replay mode)
   }
 
   // ---- one-time DOM + map setup -----------------------------------------
@@ -195,6 +196,10 @@ class DarsMapCard extends HTMLElement {
         .hd { display:flex; align-items:center; gap:10px; padding:14px 16px 12px;
               border-bottom:1px solid var(--bd); }
         .brand { font-weight:800; letter-spacing:.04em; color:var(--g); font-size:13px; }
+        .conn { width:9px; height:9px; border-radius:50%; background:var(--muted);
+                flex:none; box-shadow:0 0 0 2px rgba(0,0,0,.25); }
+        .conn.on { background:var(--g); box-shadow:0 0 6px var(--g); }
+        .conn.off { background:#ff5252; box-shadow:0 0 6px rgba(255,82,82,.6); }
         .ttl { font-size:14px; font-weight:700; flex:1; }
         .unit { background:#141414; color:var(--muted); border:1px solid var(--bd);
                 border-radius:7px; padding:2px 9px; font-size:12px; font-weight:800; cursor:pointer;
@@ -274,6 +279,7 @@ class DarsMapCard extends HTMLElement {
         <div class="card">
           <div class="hd">
             <span class="brand">D.A.R.S.</span>
+            <span class="conn" id="conn" title="Receiver" style="display:none"></span>
             <span class="ttl">${esc(this._title)}</span>
             <button type="button" class="unit" id="unit" title="Toggle units (metric / imperial)">m</button>
             <span class="badge zero" id="count">0</span>
@@ -320,6 +326,7 @@ class DarsMapCard extends HTMLElement {
     const $ = (id) => this.shadowRoot.getElementById(id);
     this._el = {
       count: $('count'), warn: $('warn'), map: $('map'), list: $('list'), unit: $('unit'),
+      conn: $('conn'),
       ctrls: $('ctrls'), replayBar: $('replay-bar'),
       modeLive: $('mode-live'), modeReplay: $('mode-replay'),
       win: $('win'), play: $('play'), scrub: $('scrub'), speed: $('speed'), tlabel: $('tlabel'),
@@ -374,6 +381,40 @@ class DarsMapCard extends HTMLElement {
       if (a && Array.isArray(a.drones)) return id;
     }
     return this._entity;
+  }
+
+  // The receiver's connection binary_sensor for the resolved drones sensor, e.g.
+  // sensor.dars_c6l_active_drones -> binary_sensor.dars_c6l_receiver_connected.
+  // Falls back to any *_receiver_connected sensor. Null if none exists.
+  _connEntity() {
+    const eid = this._resolveEntity();
+    if (eid && eid.indexOf('sensor.') === 0 && eid.endsWith('_active_drones')) {
+      const slug = eid.slice('sensor.'.length, -'_active_drones'.length);
+      const cand = 'binary_sensor.' + slug + '_receiver_connected';
+      if (this._hass.states[cand]) return cand;
+    }
+    for (const id in this._hass.states) {
+      if (id.indexOf('binary_sensor.') === 0 && id.endsWith('_receiver_connected')) return id;
+    }
+    return null;
+  }
+
+  // Update the header connection dot: green = connected, red = disconnected,
+  // grey = unknown; hidden entirely when no connectivity sensor is present.
+  _updateConn() {
+    if (!this._hass || !this._el || !this._el.conn) return;
+    const dot = this._el.conn;
+    const cid = this._connEntity();
+    if (!cid) { dot.style.display = 'none'; return; }
+    dot.style.display = '';
+    const s = this._hass.states[cid].state;
+    const connected = s === 'on';
+    const known = s === 'on' || s === 'off';
+    dot.classList.toggle('on', connected);
+    dot.classList.toggle('off', known && !connected);
+    dot.title = connected ? 'Receiver connected'
+              : known ? 'Receiver disconnected'
+              : 'Receiver status unknown';
   }
 
   _initMap(L) {
