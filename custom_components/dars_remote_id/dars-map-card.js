@@ -13,8 +13,12 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.7.0';
+const DARS_CARD_VERSION = '0.9.0';
 const LEAFLET_VER = '1.9.4';
+// History tab: how far back to list detections, and the gap of absence that
+// splits one drone's samples into a new (separate) detection.
+const DARS_HISTORY_DAYS = 14;
+const DARS_DETECT_GAP_MS = 90 * 1000;
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
 
@@ -221,6 +225,18 @@ class DarsMapCard extends HTMLElement {
         .row .rssi { font-size:12px; color:var(--muted); text-align:right; }
         .row .meta { font-size:12px; color:var(--muted); grid-column:1/-1; }
         .empty { padding:26px 16px; text-align:center; color:var(--muted); font-size:13px; }
+        /* History: flat list of past detections (newest first), each replayable */
+        .detlist { max-height:300px; overflow:auto; }
+        .detrow { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:2px 10px;
+               padding:10px 16px; border-bottom:1px solid #1c1c1c; cursor:pointer; transition:background .15s; }
+        .detrow:hover { background:rgba(0,255,65,.05); }
+        .detrow .pin { width:9px; height:9px; border-radius:50%; flex:none; box-shadow:0 0 6px rgba(0,0,0,.4); }
+        .detrow .di { min-width:0; }
+        .detrow .di .name { font-family:'JetBrains Mono','Consolas',monospace; font-size:13px; font-weight:600;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .detrow .di .sub { font-size:11px; color:var(--muted); margin-top:2px; }
+        .detrow .when { text-align:right; }
+        .detrow .when .play { color:var(--g); font-weight:800; font-size:13px; }
         .tag { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em;
                border:1px solid var(--bd-hi); border-radius:4px; padding:0 5px; color:var(--muted); }
         /* Leaflet marker glyphs (divIcon, no external images) */
@@ -289,10 +305,10 @@ class DarsMapCard extends HTMLElement {
           <div class="ctrls" id="ctrls" hidden>
             <div class="modes">
               <button type="button" data-mode="live" class="on" id="mode-live">● Live</button>
-              <button type="button" data-mode="replay" id="mode-replay">⟲ Replay</button>
+              <button type="button" data-mode="replay" id="mode-replay">⟲ History</button>
             </div>
             <div class="replay-bar" id="replay-bar" hidden>
-              <select id="win" title="Day to replay"></select>
+              <button type="button" id="det-back" title="Back to detection list">‹ List</button>
               <button type="button" id="play" title="Play/pause">▶</button>
               <input type="range" id="scrub" min="0" max="1000" value="1000" step="1" />
               <select id="speed" title="Playback speed">
@@ -304,6 +320,7 @@ class DarsMapCard extends HTMLElement {
               <span class="tlabel" id="tlabel">—</span>
             </div>
           </div>
+          <div class="detlist" id="detlist" hidden></div>
           <div class="list" id="list"></div>
           <details class="attrib">
             <summary>Attributions &amp; licenses</summary>
@@ -327,9 +344,9 @@ class DarsMapCard extends HTMLElement {
     this._el = {
       count: $('count'), warn: $('warn'), map: $('map'), list: $('list'), unit: $('unit'),
       conn: $('conn'),
-      ctrls: $('ctrls'), replayBar: $('replay-bar'),
-      modeLive: $('mode-live'), modeReplay: $('mode-replay'),
-      win: $('win'), play: $('play'), scrub: $('scrub'), speed: $('speed'), tlabel: $('tlabel'),
+      ctrls: $('ctrls'), replayBar: $('replay-bar'), detlist: $('detlist'),
+      modeLive: $('mode-live'), modeReplay: $('mode-replay'), detBack: $('det-back'),
+      play: $('play'), scrub: $('scrub'), speed: $('speed'), tlabel: $('tlabel'),
     };
 
     // Units: the viewer's saved choice (localStorage) wins over the card config.
@@ -345,10 +362,9 @@ class DarsMapCard extends HTMLElement {
     // Wire the Live/Replay controls.
     if (this._showReplay) {
       this._el.ctrls.hidden = false;
-      this._populateDayOptions();
       this._el.modeLive.addEventListener('click', () => this._setMode('live'));
       this._el.modeReplay.addEventListener('click', () => this._setMode('replay'));
-      this._el.win.addEventListener('change', () => this._loadHistory());
+      this._el.detBack.addEventListener('click', () => this._backToDetections());
       this._el.speed.addEventListener('change', () => {
         if (this._replay) this._replay.speed = Number(this._el.speed.value);
       });
@@ -650,84 +666,21 @@ class DarsMapCard extends HTMLElement {
     else { this._sig = null; this._update(true); }
   }
 
-  // ---- replay: read HA Recorder history, scrub + play back --------------- #
-  // Fill the day picker with recent calendar days (Today, Yesterday, then dated),
-  // matching the D.A.R.S. app's day-grouped history. Value = that day's local
-  // midnight (ms). Covers a bit more than the usual Recorder retention.
-  _populateDayOptions() {
-    const sel = this._el.win;
-    if (!sel) return;
-    const DAYS = 14;
-    const now = new Date();
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    sel.innerHTML = '';
-    for (let i = 0; i < DAYS; i++) {
-      const d = new Date(midnight.getTime() - i * 86400000);
-      const opt = document.createElement('option');
-      opt.value = String(d.getTime());
-      opt.textContent = i === 0 ? 'Today' : i === 1 ? 'Yesterday'
-        : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-      sel.appendChild(opt);
-    }
-  }
-
-  _setMode(mode) {
-    if (mode === this._mode) return;
-    this._mode = mode;
-    this._el.modeLive.classList.toggle('on', mode === 'live');
-    this._el.modeReplay.classList.toggle('on', mode === 'replay');
-    this._el.replayBar.hidden = mode !== 'replay';
-    if (mode === 'replay') {
-      this._populateDayOptions();   // refresh so "Today" is current
-      this._clearMarkers();
-      this._loadHistory();
-    } else {
-      this._pauseReplay();
-      this._clearPaths();
-      this._clearMarkers();
-      this._replay = null;
-      this._fitted = true;          // don't refit when live resumes
-      this._sig = null;
-      this._update(true);           // resume live rendering
-    }
-  }
-
-  // Pull the drones sensor's state history for the chosen window and rebuild
-  // per-drone tracks. Uses HA's own Recorder (no extra storage on our side).
-  async _loadHistory() {
-    if (this._mode !== 'replay') return;
-    this._pauseReplay();
-    this._clearPaths();
-    this._clearMarkers();
+  // ---- History: list past detections, then replay one -------------------- #
+  // Fetch the drones sensor's Recorder history for [startDate,endDate] and decode
+  // it into [{t, drones}] rows (attributes carry forward when the WS omits `a`).
+  async _fetchRows(startDate, endDate) {
     const eid = this._resolveEntity();
-    // Selected calendar day: local midnight → next midnight, clamped to now.
-    const now = new Date();
-    const dayStart = Number(this._el.win.value)
-      || new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const start = new Date(dayStart);
-    const dayEnd = new Date(dayStart + 86400000);
-    const end = dayEnd > now ? now : dayEnd;
-    const dayLabel = this._el.win.selectedOptions[0] ? this._el.win.selectedOptions[0].textContent : 'that day';
-    this._warn('Loading history…');
-    this._el.tlabel.textContent = 'loading…';
-    let res;
-    try {
-      res = await this._hass.callWS({
-        type: 'history/history_during_period',
-        start_time: start.toISOString(),
-        end_time: end.toISOString(),
-        entity_ids: [eid],
-        minimal_response: false,
-        no_attributes: false,
-        significant_changes_only: false,
-      });
-    } catch (e) {
-      this._warn('History unavailable (' + (e && e.message ? e.message : e) + ').');
-      return;
-    }
+    const res = await this._hass.callWS({
+      type: 'history/history_during_period',
+      start_time: startDate.toISOString(),
+      end_time: endDate.toISOString(),
+      entity_ids: [eid],
+      minimal_response: false,
+      no_attributes: false,
+      significant_changes_only: false,
+    });
     const arr = (res && res[eid]) || [];
-    // Decode the compressed history into [{t, drones}] rows (attributes carry
-    // forward when the WS omits an unchanged `a`).
     const rows = [];
     let lastAttrs = {};
     for (const item of arr) {
@@ -738,60 +691,189 @@ class DarsMapCard extends HTMLElement {
       lastAttrs = a;
       rows.push({ t, drones: Array.isArray(a.drones) ? a.drones : [] });
     }
-    // Map each MAC to the serial (uasId) it ever reported. A drone seen before
-    // its Basic-ID arrives is shown by MAC; once the serial is known, later
-    // samples carry it. Without this, those two phases become two tracks (the
-    // "same drone twice" bug). Keying every sample by the MAC's canonical serial
-    // (when known) merges them into one continuous track — and also stitches a
-    // drone across BLE MAC rotation, since the serial is the stable identity.
+    return rows;
+  }
+
+  // Map each MAC to the serial (uasId) it ever reported, so a drone seen before
+  // its Basic-ID arrives — or across BLE MAC rotation — stays a single identity.
+  _keyMapper(rows) {
     const macToSerial = {};
     for (const row of rows) {
       for (const d of row.drones) {
         if (d.mac && d.id && d.id !== d.mac) macToSerial[d.mac] = d.id;
       }
     }
-    const keyOf = (d) => macToSerial[d.mac] || d.id || d.mac;
+    return { macToSerial, keyOf: (d) => macToSerial[d.mac] || d.id || d.mac };
+  }
 
-    const tracks = {};
-    let tMin = Infinity, tMax = -Infinity;
+  // Load recent history, segment it into discrete detections, render the list.
+  async _loadDetections() {
+    this._detections = null;
+    this._warn(this._mapWarn || '');
+    this._el.detlist.innerHTML = `<div class="empty">Loading history…</div>`;
+    const now = new Date();
+    const start = new Date(now.getTime() - DARS_HISTORY_DAYS * 86400000);
+    let rows;
+    try {
+      rows = await this._fetchRows(start, now);
+    } catch (e) {
+      this._el.detlist.innerHTML =
+        `<div class="empty">History unavailable (${esc(e && e.message ? e.message : String(e))}).</div>`;
+      return;
+    }
+    if (this._mode !== 'replay') return;   // user left the tab while loading
+
+    const { macToSerial, keyOf } = this._keyMapper(rows);
+    // Gather positioned samples per identity, in time order.
+    const byKey = {};
     for (const row of rows) {
-      const t = row.t;
       for (const d of row.drones) {
         if (d.lat == null || d.lon == null) continue;
         const key = keyOf(d);
         if (!key) continue;
-        // Canonical identity for stable markers/colour across a merged track.
-        const sample = Object.assign({ t }, d, { mac: key, id: d.id || macToSerial[d.mac] || null });
-        (tracks[key] || (tracks[key] = { key, mac: key, samples: [] })).samples.push(sample);
-        if (t < tMin) tMin = t;
-        if (t > tMax) tMax = t;
+        const sample = Object.assign({ t: row.t }, d,
+          { mac: key, id: d.id || macToSerial[d.mac] || null });
+        (byKey[key] || (byKey[key] = [])).push(sample);
       }
     }
-    if (!Object.keys(tracks).length) {
-      this._warn(`No drone positions recorded for ${dayLabel} (Recorder retention / no flights).`);
-      this._el.tlabel.textContent = '—';
-      this._el.scrub.disabled = true;
+    // Split each identity's samples into detections on gaps of absence.
+    const dets = [];
+    for (const key in byKey) {
+      const s = byKey[key].sort((a, b) => a.t - b.t);
+      let seg = null;
+      for (const smp of s) {
+        if (!seg || smp.t - seg.tEnd > DARS_DETECT_GAP_MS) {
+          seg = { key, mac: key, id: smp.id, make: smp.make, model: smp.model,
+            faa: smp.faa_registration, samples: [smp], tStart: smp.t, tEnd: smp.t };
+          dets.push(seg);
+        } else {
+          seg.samples.push(smp);
+          seg.tEnd = smp.t;
+          if (!seg.id && smp.id) seg.id = smp.id;
+          if (!seg.make && smp.make) seg.make = smp.make;
+          if (!seg.model && smp.model) seg.model = smp.model;
+          if (!seg.faa && smp.faa_registration) seg.faa = smp.faa_registration;
+        }
+      }
+    }
+    dets.sort((a, b) => b.tStart - a.tStart);   // newest first
+    this._detections = dets;
+    this._renderDetectionList(dets);
+  }
+
+  _fmtDuration(ms) {
+    const s = Math.max(1, Math.round(ms / 1000));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60), r = s % 60;
+    if (m < 60) return r ? `${m}m ${r}s` : `${m}m`;
+    const h = Math.floor(m / 60), rm = m % 60;
+    return rm ? `${h}h ${rm}m` : `${h}h`;
+  }
+
+  _renderDetectionList(dets) {
+    if (!dets || !dets.length) {
+      this._el.detlist.innerHTML =
+        `<div class="empty">No detections in the last ${DARS_HISTORY_DAYS} days
+         (Recorder retention / no flights).</div>`;
       return;
     }
-    for (const k in tracks) tracks[k].samples.sort((a, b) => a.t - b.t);
-    this._warn(this._mapWarn || '');
-    this._replay = { tracks, tMin, tMax, tCur: tMax, playing: false,
-      speed: Number(this._el.speed.value) || 4 };
-    this._el.scrub.disabled = false;
-    this._el.scrub.min = String(tMin);
-    this._el.scrub.max = String(tMax);
-    this._el.scrub.step = '1000';
-    this._el.scrub.value = String(tMax);
+    this._el.detlist.innerHTML = dets.map((det, i) => {
+      const color = this._colorFor(det.mac);
+      const name = esc(det.id || det.mac || '—');
+      const mm = [det.make, det.model].filter(Boolean).join(' ');
+      const sub = [mm, det.faa].filter(Boolean).map(esc).join(' · ');
+      const dur = esc(this._fmtDuration(det.tEnd - det.tStart));
+      const when = new Date(det.tStart).toLocaleString();
+      return `<div class="detrow" data-i="${i}">
+          <span class="pin" style="background:${color}"></span>
+          <div class="di">
+            <div class="name" style="color:${color}">${name}</div>
+            <div class="sub">${esc(when)} · ${dur}${sub ? ' · ' + sub : ''}</div>
+          </div>
+          <div class="when"><span class="play">▶</span></div>
+        </div>`;
+    }).join('');
+    this._el.detlist.querySelectorAll('.detrow').forEach((row) => {
+      row.addEventListener('click', () => {
+        const i = Number(row.getAttribute('data-i'));
+        if (this._detections && this._detections[i]) this._openDetection(this._detections[i]);
+      });
+    });
+  }
 
-    // Fit once to the whole session, then render the final frame paused.
+  // Open one detection: a single-track replay scoped to its own time window.
+  _openDetection(det) {
+    this._pauseReplay();
+    this._clearPaths();
+    this._clearMarkers();
+    const key = det.key;
+    this._replay = {
+      tracks: { [key]: { key, mac: key, samples: det.samples } },
+      tMin: det.tStart, tMax: det.tEnd, tCur: det.tStart,
+      playing: false, speed: Number(this._el.speed.value) || 4,
+    };
+    // Swap views: hide the detection list, show the replay bar + snapshot list.
+    this._el.detlist.hidden = true;
+    this._el.list.hidden = false;
+    this._el.replayBar.hidden = false;
+    this._el.scrub.disabled = det.tEnd <= det.tStart;
+    this._el.scrub.min = String(det.tStart);
+    this._el.scrub.max = String(det.tEnd);
+    this._el.scrub.step = '1000';
+    this._el.scrub.value = String(det.tStart);
+    this._warn(this._mapWarn || '');
+    // Fit the map to this detection (plus home) once.
     if (this._map) {
-      const pts = [];
-      for (const k in tracks) for (const s of tracks[k].samples) pts.push([s.lat, s.lon]);
+      const pts = det.samples.map((s) => [s.lat, s.lon]);
       if (this._home) pts.push([this._home.getLatLng().lat, this._home.getLatLng().lng]);
       if (pts.length) this._map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
-      this._fitted = true;   // keep the session fit; stop per-frame auto-fit
+      this._fitted = true;
     }
     this._renderReplayFrame();
+  }
+
+  // Return from a single-detection replay to the detection list.
+  _backToDetections() {
+    this._pauseReplay();
+    this._clearPaths();
+    this._clearMarkers();
+    this._replay = null;
+    this._el.replayBar.hidden = true;
+    this._el.list.hidden = true;
+    this._el.detlist.hidden = false;
+    this._warn(this._mapWarn || '');
+    if (this._detections) this._renderDetectionList(this._detections);
+    else this._loadDetections();
+  }
+
+  _setMode(mode) {
+    if (mode === this._mode) return;
+    this._mode = mode;
+    this._el.modeLive.classList.toggle('on', mode === 'live');
+    this._el.modeReplay.classList.toggle('on', mode === 'replay');
+    if (mode === 'replay') {
+      // Enter History: show the flat detection list. The replay bar + snapshot
+      // list stay hidden until the user opens a specific detection.
+      this._pauseReplay();
+      this._clearPaths();
+      this._clearMarkers();
+      this._replay = null;
+      this._el.replayBar.hidden = true;
+      this._el.list.hidden = true;
+      this._el.detlist.hidden = false;
+      this._loadDetections();
+    } else {
+      this._pauseReplay();
+      this._clearPaths();
+      this._clearMarkers();
+      this._replay = null;
+      this._el.replayBar.hidden = true;
+      this._el.detlist.hidden = true;
+      this._el.list.hidden = false;
+      this._fitted = true;          // don't refit when live resumes
+      this._sig = null;
+      this._update(true);           // resume live rendering
+    }
   }
 
   // Interpolated snapshot of every track at time t (drone dicts like live).
