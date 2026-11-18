@@ -22,12 +22,14 @@
   "entity": {
     "binary_sensor": {
       "drone_detected": { "name": "Drone detected" },
-      "connected": { "name": "Receiver connected" }
+      "connected": { "name": "Receiver connected" },
+      "external_power": { "name": "External power" }
     },
     "sensor": {
       "drone_count": { "name": "Active drones" },
       "nearest_id": { "name": "Nearest drone ID" },
-      "nearest_rssi": { "name": "Nearest drone signal" }
+      "nearest_rssi": { "name": "Nearest drone signal" },
+      "battery": { "name": "Receiver battery" }
     },
     "device_tracker": {
       "nearest_drone": { "name": "Nearest drone" }

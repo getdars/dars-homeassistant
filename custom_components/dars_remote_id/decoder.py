@@ -158,3 +158,72 @@ def is_licensed(status: bytes | bytearray) -> bool:
     bit 0 of byte 21. A genuine, activated D.A.R.S. unit sets it."""
     b = bytes(status)
     return len(b) >= 22 and (b[21] & 0x01) != 0
+
+
+# --------------------------------------------------------------------------- #
+#  Receiver status (0xFFF3 read) -> board model, battery, power
+# --------------------------------------------------------------------------- #
+# Same layout the D.A.R.S. Android app reads:
+#   [0] audio  [1] mode  [2] LoRa region (0xFF on the ESP32-C5 boards, which have no LoRa)
+#   [21] bit0 licence valid
+#   C5 boards only:
+#   [121] caps: 0x01 display, 0x02 buzzer, 0x04 SD card, 0x08 SD logging,
+#               0x10 display on, 0x20 external power / charging, 0x40 battery fields valid
+#   [122:124] battery mV (LE)   [124] battery %   (when caps & 0x40)
+#   [125] board flags: 0x01 touch screen (M5Stack ToughC5), 0x02 touch enabled
+MODEL_C6L = "M5Stack Unit C6L"
+MODEL_XIAO = "Seeed XIAO ESP32-C5 (dual-band)"
+MODEL_XIAO_EXP = "Seeed XIAO ESP32-C5 + Expansion Board (dual-band)"
+MODEL_WAVESHARE = "Waveshare ESP32-C5-WIFI6-KIT (dual-band)"
+MODEL_TOUGHC5 = "M5Stack ToughC5 (dual-band)"
+
+
+@dataclass
+class DarsStatus:
+    """Decoded receiver status. ``battery_mv``/``battery_pct`` are None when the
+    board reports no battery."""
+
+    model: str = "Drone Remote ID receiver"
+    dual_band: bool = False
+    battery_mv: int | None = None
+    battery_pct: int | None = None
+    external_power: bool | None = None
+    sd_card: str | None = None  # "logging" | "present" | "none"; None = no SD slot info
+
+    @property
+    def has_battery(self) -> bool:
+        return self.battery_mv is not None
+
+
+def parse_status(status: bytes | bytearray) -> DarsStatus:
+    """Identify the board and read its battery/power state from a status read.
+    Short or older payloads degrade to the generic model with no battery."""
+    b = bytes(status)
+    st = DarsStatus()
+    if len(b) < 7:
+        return st  # older firmware: too short to tell the board apart
+    # The C6L fills the LoRa fields; the C5 boards send region 0xFF.
+    if b[2] != 0xFF:
+        st.model = MODEL_C6L
+        return st
+    st.dual_band = True
+    caps = b[121] if len(b) >= 122 else 0
+    flags = b[125] if len(b) >= 126 else 0
+    if caps & 0x40 and len(b) >= 125:
+        mv = _u16(b, 122)
+        if mv > 0:
+            st.battery_mv = mv
+            st.battery_pct = min(100, b[124])
+    if len(b) >= 122:
+        st.external_power = bool(caps & 0x20)
+    if flags & 0x01:
+        st.model = MODEL_TOUGHC5
+    elif st.has_battery:
+        st.model = MODEL_WAVESHARE
+    elif caps & 0x1F:
+        st.model = MODEL_XIAO_EXP
+    else:
+        st.model = MODEL_XIAO
+    if caps & 0x1F or flags & 0x01:
+        st.sd_card = "logging" if caps & 0x08 else "present" if caps & 0x04 else "none"
+    return st

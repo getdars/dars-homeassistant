@@ -24,8 +24,11 @@ class DarsEntity(Entity):
             identifiers={(DOMAIN, entry.unique_id)},
             name=entry.title,
             manufacturer="D.A.R.S.",
-            model="Drone Remote ID receiver",
         )
+        # The board model comes from the receiver's status read (coordinator),
+        # so only set it here once known; a fixed value would overwrite it.
+        if coordinator.status is not None:
+            self._attr_device_info["model"] = coordinator.status.model
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

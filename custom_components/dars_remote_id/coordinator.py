@@ -21,6 +21,7 @@ from bleak_retry_connector import (
 
 from homeassistant.components import bluetooth
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
@@ -28,10 +29,18 @@ from .const import (
     DATA_UUID,
     DRONE_EXPIRE_S,
     RECONNECT_S,
+    STATUS_REFRESH_S,
     STATUS_UUID,
     TICK_S,
 )
-from .decoder import DarsDrone, apply_message, is_licensed, parse_frame
+from .decoder import (
+    DarsDrone,
+    DarsStatus,
+    apply_message,
+    is_licensed,
+    parse_frame,
+    parse_status,
+)
 from .faa_lookup import FaaLookup
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,6 +58,15 @@ class DarsCoordinator:
         # Assume licensed until a successful status read says otherwise, so the
         # integration still works if the (open) read is momentarily blocked.
         self.licensed = True
+        # Board model + battery/power, from the same status read. None until the
+        # first successful read.
+        self.status: DarsStatus | None = None
+        self._model: str | None = None
+        self._status_ticks = 0
+        # Called once, the first time a status read reports a battery, so the
+        # sensor platform can add the battery entities for that board only.
+        self._battery_listeners: list[Callable[[], None]] = []
+        self._battery_announced = False
 
         # FAA make/model resolver (serial -> declared make/model). Shared HA
         # session so its cookie jar carries the uasdoc.faa.gov session cookie.
@@ -137,11 +155,7 @@ class DarsCoordinator:
 
             # Best-effort licence gate — the status read is open (no bond) on the
             # firmware, but proceed if a stack blocks it before bonding.
-            try:
-                status = await client.read_gatt_char(STATUS_UUID)
-                self.licensed = is_licensed(status)
-            except Exception as err:  # noqa: BLE001 - read is optional
-                _LOGGER.debug("%s: licence read skipped (%s)", self.address, err)
+            if not await self._async_read_status():
                 self.licensed = True
 
             self.connected = True
@@ -185,6 +199,56 @@ class DarsCoordinator:
             except Exception as err:  # noqa: BLE001
                 _LOGGER.debug("%s: disconnect error (%s)", self.address, err)
 
+    # ----- status ---------------------------------------------------------- #
+    @callback
+    def async_add_battery_listener(self, cb: Callable[[], None]) -> None:
+        """Run ``cb`` once when the receiver first reports a battery (now, if it
+        already has)."""
+        if self._battery_announced:
+            cb()
+        else:
+            self._battery_listeners.append(cb)
+
+    async def _async_read_status(self) -> bool:
+        """Read 0xFFF3: licence flag, board model, battery and power. Returns
+        False if the read failed (it is best-effort and never drops the link)."""
+        client = self._client
+        if client is None:
+            return False
+        try:
+            raw = await client.read_gatt_char(STATUS_UUID)
+        except Exception as err:  # noqa: BLE001 - read is optional
+            _LOGGER.debug("%s: status read skipped (%s)", self.address, err)
+            return False
+        self.licensed = is_licensed(raw)
+        self.status = parse_status(raw)
+        self._update_model(self.status.model)
+        if self.status.has_battery and not self._battery_announced:
+            self._battery_announced = True
+            for cb in self._battery_listeners:
+                cb()
+            self._battery_listeners.clear()
+        return True
+
+    @callback
+    def _update_model(self, model: str) -> None:
+        """Show the detected board on the device page."""
+        if model == self._model:
+            return
+        reg = dr.async_get(self.hass)
+        device = reg.async_get_device(
+            connections={(dr.CONNECTION_BLUETOOTH, self.address)}
+        )
+        if device is None:
+            return  # entities not registered yet; the next status read retries
+        if device.model != model:
+            reg.async_update_device(device.id, model=model)
+        self._model = model
+
+    async def _async_refresh_status(self) -> None:
+        if self.connected and await self._async_read_status():
+            self._async_notify()
+
     # ----- data ------------------------------------------------------------ #
     @callback
     def _on_frame(self, _char, data: bytearray) -> None:
@@ -225,6 +289,11 @@ class DarsCoordinator:
         stale = [mac for mac, drone in self.drones.items() if drone.last < cutoff]
         for mac in stale:
             del self.drones[mac]
+        # Battery and power change slowly; re-read the status once a minute.
+        self._status_ticks += 1
+        if self.connected and self._status_ticks * TICK_S >= STATUS_REFRESH_S:
+            self._status_ticks = 0
+            self.hass.async_create_task(self._async_refresh_status())
         self._async_notify()
 
     # ----- helpers for entities ------------------------------------------- #

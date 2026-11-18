@@ -23,5 +23,8 @@ DRONE_EXPIRE_S = 30.0
 # Coordinator housekeeping tick: prune stale drones + refresh entity attributes.
 TICK_S = 1.0
 
+# Re-read the receiver status (battery, power) this often while connected.
+STATUS_REFRESH_S = 60.0
+
 # Delay before retrying a dropped/failed BLE connection.
 RECONNECT_S = 10.0

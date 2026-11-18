@@ -1,4 +1,5 @@
-"""Sensors for D.A.R.S.: active drone count, nearest-drone id, nearest RSSI."""
+"""Sensors for D.A.R.S.: active drone count, nearest-drone id, nearest RSSI,
+and receiver battery (boards that report one: Waveshare ESP32-C5 kit, ToughC5)."""
 
 from __future__ import annotations
 
@@ -8,7 +9,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+from homeassistant.const import (
+    PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -29,6 +34,10 @@ async def async_setup_entry(
             DarsNearestId(coordinator, entry),
             DarsNearestRssi(coordinator, entry),
         ]
+    )
+    # Battery only exists on some boards; add it when the receiver reports one.
+    coordinator.async_add_battery_listener(
+        lambda: async_add_entities([DarsBattery(coordinator, entry)])
     )
 
 
@@ -93,3 +102,32 @@ class DarsNearestRssi(DarsEntity, SensorEntity):
     def native_value(self) -> int | None:
         rssis = [d.rssi for d in self.coordinator.drones.values() if d.rssi is not None]
         return max(rssis) if rssis else None
+
+
+class DarsBattery(DarsEntity, SensorEntity):
+    """Receiver battery level. Unknown while on external power: the charger then
+    holds the cell full, so the reading says nothing about its charge."""
+
+    _attr_translation_key = "battery"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DarsCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.unique_id}_battery"
+
+    @property
+    def native_value(self) -> int | None:
+        st = self.coordinator.status
+        if st is None or not st.has_battery or st.external_power:
+            return None
+        return st.battery_pct
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        st = self.coordinator.status
+        if st is None or not st.has_battery:
+            return {}
+        return {"voltage": round(st.battery_mv / 1000, 2)}

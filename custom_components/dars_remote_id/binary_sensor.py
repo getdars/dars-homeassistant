@@ -28,6 +28,9 @@ async def async_setup_entry(
             DarsConnected(coordinator, entry),
         ]
     )
+    coordinator.async_add_battery_listener(
+        lambda: async_add_entities([DarsExternalPower(coordinator, entry)])
+    )
 
 
 class DarsDroneDetected(DarsEntity, BinarySensorEntity):
@@ -71,4 +74,28 @@ class DarsConnected(DarsEntity, BinarySensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"licensed": self.coordinator.licensed}
+        attrs = {"licensed": self.coordinator.licensed}
+        st = self.coordinator.status
+        if st is not None:
+            attrs["model"] = st.model
+            attrs["dual_band"] = st.dual_band
+            if st.sd_card is not None:
+                attrs["sd_card"] = st.sd_card
+        return attrs
+
+
+class DarsExternalPower(DarsEntity, BinarySensorEntity):
+    """On while a battery-capable receiver runs from USB / DC (and charges)."""
+
+    _attr_translation_key = "external_power"
+    _attr_device_class = BinarySensorDeviceClass.PLUG
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: DarsCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.unique_id}_external_power"
+
+    @property
+    def is_on(self) -> bool | None:
+        st = self.coordinator.status
+        return None if st is None else st.external_power

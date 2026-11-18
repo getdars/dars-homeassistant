@@ -20,7 +20,13 @@ Per receiver (one device in HA):
 | **Nearest drone ID** | sensor | Serial/ID of the strongest‑signal drone. Attributes: that drone's telemetry. |
 | **Nearest drone signal** | sensor (dBm) | RSSI of the strongest drone. |
 | **Nearest drone** | device_tracker | Map marker following the strongest drone (with operator location in attributes). |
-| **Receiver connected** | binary_sensor (connectivity, diagnostic) | BLE link status. Attribute: `licensed`. |
+| **Receiver connected** | binary_sensor (connectivity, diagnostic) | BLE link status. Attributes: `licensed`, `model` (detected board), `dual_band`, and `sd_card` (`logging` / `present` / `none`) on boards with a microSD slot. |
+| **Receiver battery** | sensor (%, diagnostic) | Only on boards that report a battery (Waveshare ESP32‑C5 kit, M5Stack ToughC5). Unknown while on external power, because the charger then holds the cell full. Attribute: `voltage`. |
+| **External power** | binary_sensor (plug, diagnostic) | Only on the same boards. On while the receiver runs from USB or DC. |
+
+The device page shows which board is connected: M5Stack Unit C6L, Seeed XIAO
+ESP32‑C5 (with or without the Expansion Board), Waveshare ESP32‑C5‑WIFI6‑KIT or
+M5Stack ToughC5. Battery and power are re-read once a minute.
 
 Automation ideas: announce on a speaker when *Drone detected* turns on, flash a
 light, push a phone notification with the nearest drone's ID and distance, or log
@@ -39,8 +45,9 @@ Until merged, HA shows a generic placeholder; functionality is unaffected.
   range of the receiver — either a local adapter or an
   [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy/)
   (needs an *active‑connection* capable proxy).
-- A genuine, **activated** D.A.R.S. receiver (M5Stack Unit C6L or XIAO ESP32‑C5)
-  running current firmware. Get at
+- A genuine, **activated** D.A.R.S. receiver running current firmware: the
+  2.4 GHz M5Stack Unit C6L, or a dual‑band (2.4 + 5 GHz) board — Seeed XIAO
+  ESP32‑C5, Waveshare ESP32‑C5‑WIFI6‑KIT or M5Stack ToughC5. Get at
   [getdars.com](https://getdars.com/).
 
 ## Install (HACS)
@@ -117,8 +124,9 @@ The receiver exposes a GATT service `0xFFF1` with a notify characteristic
 ASTM F3411 message). The integration keeps a long‑lived connection, decodes each
 frame (`decoder.py`, a faithful port of the D.A.R.S. web viewer's decoder, unit
 tested for parity), maintains a registry of drones (dropped 30 s after their last
-frame), and pushes entity updates. On connect it reads the `0xFFF3` status to
-check the licence flag.
+frame), and pushes entity updates. On connect, and then once a minute, it reads
+the `0xFFF3` status for the licence flag, the board model and, where the board
+reports them, battery and power.
 
 ## Notes & limits
 
