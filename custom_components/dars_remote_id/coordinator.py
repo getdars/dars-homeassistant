@@ -74,6 +74,7 @@ class DarsCoordinator:
         self.status: DarsStatus | None = None
         self._model: str | None = None
         self._status_ticks = 0
+        self._status_failures = 0
         # Called once, the first time a status read reports a battery, so the
         # sensor platform can add the battery entities for that board only.
         self._battery_listeners: list[Callable[[], None]] = []
@@ -83,6 +84,11 @@ class DarsCoordinator:
         # session so its cookie jar carries the uasdoc.faa.gov session cookie.
         self.faa = FaaLookup(async_get_clientsession(hass))
         self._faa_seen: set[str] = set()
+
+        # Debug counters, logged every 10 s at debug level.
+        self._frames_rx = 0
+        self._frames_bad = 0
+        self._diag_ticks = 0
 
         self._client: BleakClientWithServiceCache | None = None
         self._listeners: list[CALLBACK_TYPE] = []
@@ -265,14 +271,33 @@ class DarsCoordinator:
         self._model = model
 
     async def _async_refresh_status(self) -> None:
-        if self.connected and await self._async_read_status():
+        if not self.connected:
+            return
+        if await self._async_read_status():
+            self._status_failures = 0
             self._async_notify()
+            return
+        # The once-a-minute status read doubles as a link check: if the receiver
+        # rebooted or vanished without the stack reporting a disconnect, HA would
+        # otherwise show "connected" forever and never reconnect. Two misses in a
+        # row (a single one can be a busy receiver) drop the link and reconnect.
+        self._status_failures += 1
+        if self._status_failures >= 2:
+            _LOGGER.debug(
+                "%s: status read failed twice, reconnecting", self.address
+            )
+            self._status_failures = 0
+            await self._async_disconnect()
+            self._async_notify()
+            self._schedule_reconnect()
 
     # ----- data ------------------------------------------------------------ #
     @callback
     def _on_frame(self, _char, data: bytearray) -> None:
+        self._frames_rx += 1
         parsed = parse_frame(data)
         if parsed is None:
+            self._frames_bad += 1
             return
         mac, rssi, channel, msg = parsed
         now = time.monotonic()
@@ -313,6 +338,19 @@ class DarsCoordinator:
         stale = [mac for mac, drone in self.drones.items() if drone.last < cutoff]
         for mac in stale:
             del self.drones[mac]
+        self._diag_ticks += 1
+        if self._diag_ticks * TICK_S >= 10:
+            self._diag_ticks = 0
+            _LOGGER.debug(
+                "%s: connected=%s frames=%d bad=%d drones=%d",
+                self.address,
+                self.connected,
+                self._frames_rx,
+                self._frames_bad,
+                len(self.drones),
+            )
+            self._frames_rx = 0
+            self._frames_bad = 0
         # Battery and power change slowly; re-read the status once a minute.
         self._status_ticks += 1
         if self.connected and self._status_ticks * TICK_S >= STATUS_REFRESH_S:
