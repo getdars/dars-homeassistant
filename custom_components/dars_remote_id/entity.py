@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
 from .const import DOMAIN
@@ -20,7 +20,7 @@ class DarsEntity(Entity):
         self.coordinator = coordinator
         self._entry = entry
         self._attr_device_info = DeviceInfo(
-            connections={(CONNECTION_BLUETOOTH, coordinator.address)},
+            connections=coordinator.device_connections,
             identifiers={(DOMAIN, entry.unique_id)},
             name=entry.title,
             manufacturer="D.A.R.S.",
@@ -29,6 +29,8 @@ class DarsEntity(Entity):
         # so only set it here once known; a fixed value would overwrite it.
         if coordinator.status is not None:
             self._attr_device_info["model"] = coordinator.status.model
+        elif coordinator.model_hint:
+            self._attr_device_info["model"] = coordinator.model_hint
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

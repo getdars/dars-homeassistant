@@ -2,16 +2,31 @@
   "domain": "dars_remote_id",
   "name": "D.A.R.S. Drone Remote ID",
   "bluetooth": [
-    { "local_name": "DARS-*", "connectable": true },
-    { "service_uuid": "0000fff1-0000-1000-8000-00805f9b34fb", "connectable": true }
+    {
+      "local_name": "DARS-*",
+      "connectable": true
+    },
+    {
+      "service_uuid": "0000fff1-0000-1000-8000-00805f9b34fb",
+      "connectable": true
+    }
   ],
-  "codeowners": ["@getdars"],
+  "codeowners": [
+    "@getdars"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth_adapters", "frontend", "http"],
+  "dependencies": [
+    "bluetooth_adapters",
+    "frontend",
+    "http"
+  ],
   "documentation": "https://getdars.com",
   "integration_type": "device",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/getdars/dars-homeassistant/issues",
-  "requirements": ["bleak-retry-connector>=3.5.0"],
-  "version": "0.10.0"
+  "requirements": [
+    "bleak-retry-connector>=3.5.0",
+    "pyserial-asyncio-fast>=0.11"
+  ],
+  "version": "0.11.0"
 }

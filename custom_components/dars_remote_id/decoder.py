@@ -227,3 +227,86 @@ def parse_status(status: bytes | bytearray) -> DarsStatus:
     if caps & 0x1F or flags & 0x01:
         st.sd_card = "logging" if caps & 0x08 else "present" if caps & 0x04 else "none"
     return st
+
+
+# ---------------------------------------------------------------------------
+# Wired feed: MAVLink v2 over USB serial or RS485 (via a serial-to-TCP bridge).
+#
+# The receiver's USB mode and its RS485 port send the same stream:
+#   HEARTBEAT (msg 0, crc_extra 50) once a second, and
+#   DARS_RID  (msg 12920, crc_extra 0x42) per ODID message, payload
+#     mac[6] + rssi(int8) + counter(uint8) + data[25]  (33 bytes).
+# The stream may carry other bytes too (a text banner, boot log); the parser
+# resynchronises on the 0xFD start byte and drops any frame whose CRC fails.
+# ---------------------------------------------------------------------------
+
+MAV_STX_V2 = 0xFD
+MAV_MSG_HEARTBEAT = 0
+MAV_MSG_DARS_RID = 12920
+_MAV_CRC_EXTRA = {MAV_MSG_HEARTBEAT: 50, MAV_MSG_DARS_RID: 0x42}
+_MAV_HDR = 10        # STX..msgid
+_MAV_SIG_LEN = 13    # present when incompat_flags & 0x01
+_DARS_RID_LEN = 33
+
+
+def _mav_crc(data: bytes, extra: int) -> int:
+    crc = 0xFFFF
+    for byte in (*data, extra):
+        tmp = byte ^ (crc & 0xFF)
+        tmp = (tmp ^ (tmp << 4)) & 0xFF
+        crc = ((crc >> 8) ^ (tmp << 8) ^ (tmp << 3) ^ (tmp >> 4)) & 0xFFFF
+    return crc
+
+
+class MavlinkParser:
+    """Incremental MAVLink v2 reader. ``feed()`` returns the complete, CRC-valid
+    frames of known message types as (msg_id, payload) pairs; partial data is
+    kept for the next call. Bytes that are not a valid frame are skipped."""
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+        self.bad_frames = 0
+
+    def feed(self, data: bytes | bytearray) -> list[tuple[int, bytes]]:
+        buf = self._buf
+        buf.extend(data)
+        out: list[tuple[int, bytes]] = []
+        while True:
+            start = buf.find(MAV_STX_V2)
+            if start < 0:
+                buf.clear()
+                break
+            if start:
+                del buf[:start]
+            if len(buf) < _MAV_HDR:
+                break
+            plen = buf[1]
+            total = _MAV_HDR + plen + 2 + (_MAV_SIG_LEN if buf[2] & 0x01 else 0)
+            if len(buf) < total:
+                break
+            msg_id = buf[7] | (buf[8] << 8) | (buf[9] << 16)
+            extra = _MAV_CRC_EXTRA.get(msg_id)
+            crc_rx = buf[_MAV_HDR + plen] | (buf[_MAV_HDR + plen + 1] << 8)
+            if extra is None or _mav_crc(bytes(buf[1:_MAV_HDR + plen]), extra) != crc_rx:
+                # Not ours or corrupt: drop just this start byte and resync, so
+                # a real frame starting inside the junk is not lost.
+                if extra is not None:
+                    self.bad_frames += 1
+                del buf[0]
+                continue
+            out.append((msg_id, bytes(buf[_MAV_HDR:_MAV_HDR + plen])))
+            del buf[:total]
+        # Never let unparseable junk grow without bound.
+        if len(buf) > 4096:
+            del buf[:-512]
+        return out
+
+
+def parse_dars_rid(payload: bytes) -> tuple[str, int, int, bytes] | None:
+    """DARS_RID payload -> (mac, rssi, channel, message) like ``parse_frame``.
+    MAVLink v2 trims trailing zero bytes, so pad back to full length. The wired
+    feed carries no WiFi channel; it is reported as 0."""
+    if len(payload) < 8:
+        return None
+    p = payload.ljust(_DARS_RID_LEN, b"\x00")
+    return mac_str(p, 0), _s8(p[6]), 0, p[8:33]

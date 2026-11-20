@@ -33,3 +33,18 @@ RECONNECT_S = 10.0
 # Declaration of Compliance database (sends the serial to uasdoc.faa.gov).
 CONF_FAA_LOOKUP = "faa_lookup"
 DEFAULT_FAA_LOOKUP = True
+
+# How the receiver is connected (config entry data "connection"; entries made
+# before 0.11 have no key and are Bluetooth).
+CONF_CONNECTION = "connection"
+CONNECTION_BLUETOOTH = "bluetooth"
+CONNECTION_USB = "usb"          # USB serial, receiver in USB mode
+CONNECTION_NETWORK = "network"  # TCP, e.g. RS485 via an RS485-to-Ethernet bridge
+CONF_DEVICE = "device"          # serial port path (USB)
+# CONF_HOST / CONF_PORT from homeassistant.const are used for the network link.
+
+# Wired feed (USB / RS485): MAVLink v2 at this baud rate; HEARTBEAT arrives
+# once a second, so this long without a valid frame means the link is dead.
+STREAM_BAUD = 115200
+STREAM_IDLE_S = 10.0
+DEFAULT_NETWORK_PORT = 4196     # Waveshare RS485 TO ETH (B) default TCP port

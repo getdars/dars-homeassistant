@@ -18,7 +18,7 @@ import re
 from homeassistant.components.device_tracker import SourceType, TrackerEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -100,7 +100,7 @@ class DarsDroneTracker(TrackerEntity):
         self._attr_name = f"Drone {serial}"
         # Group under the receiver device.
         self._attr_device_info = DeviceInfo(
-            connections={(CONNECTION_BLUETOOTH, coordinator.address)},
+            connections=coordinator.device_connections,
             identifiers={(DOMAIN, entry.unique_id)},
         )
 

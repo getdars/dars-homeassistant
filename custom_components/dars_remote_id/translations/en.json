@@ -2,17 +2,47 @@
   "config": {
     "flow_title": "{name}",
     "step": {
+      "confirm": {
+        "title": "Add a D.A.R.S. receiver",
+        "description": "Do you want to set up {name}?"
+      },
       "user": {
+        "title": "Add a D.A.R.S. receiver",
+        "description": "How is the receiver connected to Home Assistant?",
+        "menu_options": {
+          "pick_bluetooth": "Bluetooth",
+          "usb": "USB cable (receiver in USB mode)",
+          "network": "Network (RS485 via an RS485-to-Ethernet bridge)"
+        }
+      },
+      "pick_bluetooth": {
         "title": "Add a D.A.R.S. receiver",
         "description": "Select the D.A.R.S. receiver to connect to over Bluetooth.",
         "data": {
           "address": "Device"
         }
       },
-      "confirm": {
-        "title": "Add a D.A.R.S. receiver",
-        "description": "Do you want to set up {name}?"
+      "usb": {
+        "title": "Receiver on USB",
+        "description": "Plug the receiver into this Home Assistant machine and switch it to USB mode in the D.A.R.S. app. Then choose its serial port (D.A.R.S. boards show as Espressif).",
+        "data": {
+          "device": "Serial port"
+        }
+      },
+      "network": {
+        "title": "Receiver on the network",
+        "description": "For the M5Stack ToughC5's RS485 port through an RS485-to-Ethernet bridge (for example Waveshare RS485 TO ETH (B)) set to TCP server, 115200 baud, 8N1. Enter the bridge's IP address and TCP port.",
+        "data": {
+          "host": "IP address or host name",
+          "port": "TCP port"
+        }
       }
+    },
+    "error": {
+      "cannot_open": "Could not open that serial port. Check the port and that no other program is using it.",
+      "no_data_usb": "The port opened but no D.A.R.S. data arrived. Make sure the receiver is in USB mode.",
+      "cannot_connect": "Could not connect to that address and port.",
+      "no_data_network": "Connected, but no D.A.R.S. data arrived. Check the bridge's serial settings (115200 baud, 8N1) and the RS485 A/B wiring."
     },
     "abort": {
       "no_devices_found": "No unconfigured D.A.R.S. receivers were found in Bluetooth range. Make sure the device is powered on and nearby.",

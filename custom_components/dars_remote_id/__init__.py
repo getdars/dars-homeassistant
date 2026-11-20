@@ -6,17 +6,23 @@ import logging
 from pathlib import Path
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_ADDRESS, Platform
+from homeassistant.const import CONF_ADDRESS, CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 
 from .const import (
     CARD_FILENAME,
     CARD_VERSION,
+    CONF_CONNECTION,
+    CONF_DEVICE,
     CONF_FAA_LOOKUP,
+    CONNECTION_BLUETOOTH,
+    CONNECTION_NETWORK,
+    CONNECTION_USB,
     DEFAULT_FAA_LOOKUP,
     DOMAIN,
 )
 from .coordinator import DarsCoordinator
+from .stream import DarsStreamCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,11 +43,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up D.A.R.S. from a config entry."""
     await _async_register_card(hass)
 
-    address: str = entry.data[CONF_ADDRESS]
     faa_lookup: bool = entry.options.get(CONF_FAA_LOOKUP, DEFAULT_FAA_LOOKUP)
-    coordinator = DarsCoordinator(
-        hass, address, entry.title, entry_id=entry.entry_id, faa_lookup=faa_lookup
-    )
+    connection = entry.data.get(CONF_CONNECTION, CONNECTION_BLUETOOTH)
+    coordinator: DarsCoordinator
+    if connection == CONNECTION_USB:
+        coordinator = DarsStreamCoordinator(
+            hass, CONNECTION_USB, entry.data[CONF_DEVICE], None, entry.title,
+            entry_id=entry.entry_id, faa_lookup=faa_lookup,
+        )
+    elif connection == CONNECTION_NETWORK:
+        coordinator = DarsStreamCoordinator(
+            hass, CONNECTION_NETWORK, entry.data[CONF_HOST], entry.data[CONF_PORT],
+            entry.title, entry_id=entry.entry_id, faa_lookup=faa_lookup,
+        )
+    else:
+        coordinator = DarsCoordinator(
+            hass, entry.data[CONF_ADDRESS], entry.title,
+            entry_id=entry.entry_id, faa_lookup=faa_lookup,
+        )
     await coordinator.async_start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

@@ -299,7 +299,11 @@ class DarsCoordinator:
         if parsed is None:
             self._frames_bad += 1
             return
-        mac, rssi, channel, msg = parsed
+        self._ingest(*parsed)
+
+    @callback
+    def _ingest(self, mac: str, rssi: int, channel: int, msg: bytes) -> None:
+        """Merge one ODID message (from any transport) into the registry."""
         now = time.monotonic()
         drone = self.drones.get(mac)
         is_new = drone is None
@@ -359,6 +363,14 @@ class DarsCoordinator:
         self._async_notify()
 
     # ----- helpers for entities ------------------------------------------- #
+    @property
+    def device_connections(self) -> set[tuple[str, str]]:
+        """Device-registry connections for this receiver (its BLE address)."""
+        return {(dr.CONNECTION_BLUETOOTH, self.address)}
+
+    # Model shown on the device page when the transport has no status read.
+    model_hint: str | None = None
+
     @callback
     def _faa_merge(self, drone: DarsDrone, item: dict) -> dict:
         """Add cached FAA make/model/registration onto a drone's dict view."""

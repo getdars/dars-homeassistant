@@ -43,10 +43,14 @@ The icon and logo ship with the integration in
 
 ## Requirements
 
-- Home Assistant **2024.8** or newer with a working **Bluetooth** adapter in
-  range of the receiver — either a local adapter or an
-  [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy/)
-  (needs an *active‑connection* capable proxy).
+- Home Assistant **2024.8** or newer, and one way to reach the receiver:
+  - **Bluetooth**: a working adapter in range of the receiver, either local or
+    an [ESPHome Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy/)
+    (needs an *active‑connection* capable proxy);
+  - **USB**: the receiver plugged into the Home Assistant machine and switched
+    to **USB mode** in the D.A.R.S. app; or
+  - **Network (RS485)**: an M5Stack ToughC5 wired from its RS485 port to an
+    RS485‑to‑Ethernet bridge (see [Wired connections](#wired-connections-usb-and-rs485)).
 - A genuine, **activated** D.A.R.S. receiver running current firmware: the
   2.4 GHz M5Stack Unit C6L, or a dual‑band (2.4 + 5 GHz) board — Seeed XIAO
   ESP32‑C5, Waveshare ESP32‑C5‑WIFI6‑KIT or M5Stack ToughC5. Get at
@@ -57,12 +61,37 @@ The icon and logo ship with the integration in
 1. HACS → ⋮ → **Custom repositories** → add this repo's URL, category
    **Integration**.
 2. Install **D.A.R.S. Drone Remote ID**, then restart Home Assistant.
-3. The receiver is usually **auto‑discovered** (Settings → Devices & Services →
-   *Discovered*). Otherwise **+ Add Integration → D.A.R.S. Drone Remote ID** and
-   pick your `DARS‑…` device from the list.
+3. Over Bluetooth the receiver is usually **auto‑discovered** (Settings →
+   Devices & Services → *Discovered*). Otherwise **+ Add Integration → D.A.R.S.
+   Drone Remote ID** and choose **Bluetooth**, **USB cable** or **Network**.
 
 Manual install: copy `custom_components/dars_remote_id/` into your HA
 `config/custom_components/` and restart.
+
+## Wired connections (USB and RS485)
+
+Besides Bluetooth, the integration can read the receiver's wired feed: the same
+MAVLink stream the D.A.R.S. Windows viewer and ATAK use (a heartbeat once a
+second plus one frame per Remote ID message). Detections, the map card and the
+drone trackers work the same way. The wired feed carries no battery or board
+status, so those entities don't appear for a wired receiver.
+
+**USB.** Plug the receiver into the Home Assistant machine, switch it to **USB
+mode** in the D.A.R.S. app, then **+ Add Integration → D.A.R.S. Drone Remote ID
+→ USB cable** and pick its serial port (D.A.R.S. boards show as *Espressif*;
+`/dev/serial/by-id/…` names are kept so the port survives a re‑plug).
+
+**RS485 over the network (M5Stack ToughC5).** The ToughC5 sends the same feed on
+its RS485 port in every mode, 115200 baud 8N1. Wire it to an RS485‑to‑Ethernet
+bridge, for example the Waveshare *RS485 TO ETH (B)*, set the bridge to **TCP
+server**, 115200 8N1, then **+ Add Integration → D.A.R.S. Drone Remote ID →
+Network** with the bridge's IP address and port (default 4196). ToughC5 RS485
+port: GND (black), 6–24 V in (red), A (yellow), B (white); the bridge doesn't
+supply power, so feed 12 V to both, for example from a PoE splitter.
+
+The setup checks that D.A.R.S. data actually arrives before it saves. A wired
+link counts as connected while frames arrive, and reconnects on its own when
+the port or socket closes or nothing arrives for 10 seconds.
 
 ## Map card — bundled, no separate install
 
@@ -137,7 +166,7 @@ your Home Assistant. Two optional features make requests to the internet:
 
 ## How it works
 
-The receiver exposes a GATT service `0xFFF1` with a notify characteristic
+Over Bluetooth, the receiver exposes a GATT service `0xFFF1` with a notify characteristic
 `0xFFF2` that streams fixed 34‑byte frames (`mac`, `rssi`, `channel`, 25‑byte
 ASTM F3411 message). The integration keeps a long‑lived connection, decodes each
 frame (`decoder.py`, a faithful port of the D.A.R.S. web viewer's decoder, unit
