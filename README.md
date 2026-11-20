@@ -128,7 +128,7 @@ your Home Assistant. Two optional features make requests to the internet:
   make and model. One request per new serial, cached afterwards. Nothing else is
   sent (no location, no receiver or user data). Turn it off in **Settings →
   Devices & services → D.A.R.S. Drone Remote ID → Configure** → *Look up drone
-  make and model online (FAA)*.
+  make and model online*.
 - **Map tiles (viewing browser).** The map card fetches the base-map style and
   tiles from OpenFreeMap (`https://tiles.openfreemap.org`), like any web map.
   Those requests carry the map area being viewed and the browser's IP address,

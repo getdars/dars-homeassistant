@@ -25,7 +25,7 @@
         "title": "D.A.R.S. options",
         "description": "The FAA lookup sends the serial number of each drone the receiver picks up to the public FAA UAS Declaration of Compliance database (uasdoc.faa.gov) to show its declared make and model. Turn it off to keep everything on your local network.",
         "data": {
-          "faa_lookup": "Look up drone make and model online (FAA)"
+          "faa_lookup": "Look up drone make and model online"
         }
       }
     }
