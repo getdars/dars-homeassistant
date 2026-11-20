@@ -6,8 +6,11 @@ Remote ID that nearby drones broadcast (2.4 GHz / 5 GHz Wi‑Fi and Bluetooth) a
 streams each detection to HA, where it becomes entities you can put on a
 dashboard, a map, and into automations.
 
-> Local push, no cloud. The BLE link is entirely local; nothing leaves your
-> network.
+> **Local push.** The receiver talks to Home Assistant over a local Bluetooth
+> link, with no D.A.R.S. cloud account or server involved. Two optional features
+> do use the internet; both are described under
+> [Privacy and network access](#privacy-and-network-access), and the FAA lookup
+> can be turned off.
 
 ## What you get
 
@@ -20,6 +23,7 @@ Per receiver (one device in HA):
 | **Nearest drone ID** | sensor | Serial/ID of the strongest‑signal drone. Attributes: that drone's telemetry. |
 | **Nearest drone signal** | sensor (dBm) | RSSI of the strongest drone. |
 | **Nearest drone** | device_tracker | Map marker following the strongest drone (with operator location in attributes). |
+| **Drone *serial*** | device_tracker (one per drone) | Added automatically for each drone that broadcasts a serial number; shows that drone's position while it is being detected. |
 | **Receiver connected** | binary_sensor (connectivity, diagnostic) | BLE link status. Attributes: `licensed`, `model` (detected board), `dual_band`, and `sd_card` (`logging` / `present` / `none`) on boards with a microSD slot. |
 | **Receiver battery** | sensor (%, diagnostic) | Only on boards that report a battery (Waveshare ESP32‑C5 kit, M5Stack ToughC5). Unknown while on external power, because the charger then holds the cell full. Attribute: `voltage`. |
 | **External power** | binary_sensor (plug, diagnostic) | Only on the same boards. On while the receiver runs from USB or DC. |
@@ -34,10 +38,8 @@ the `drones` attribute to history.
 
 ## Integration icon
 
-HA shows an integration's logo from the central `home-assistant/brands` repo (a
-custom component can't ship its own brand icon). Ready-to-submit icons are in
-[`brands/`](brands/) — see that folder's README to add them via a brands PR.
-Until merged, HA shows a generic placeholder; functionality is unaffected.
+The icon and logo ship with the integration in
+[`custom_components/dars_remote_id/brand/`](custom_components/dars_remote_id/brand/).
 
 ## Requirements
 
@@ -91,31 +93,47 @@ device). Matches the D.A.R.S. app (m→ft, m/s→mph).
 vector tiles (same styles as the D.A.R.S. app). The on‑map switcher remembers the
 viewer's choice. See `ATTRIBUTIONS.md` for data/library licences.
 
-**Live / Replay.** The card has a **Live** and a **Replay** mode. Replay reads
-this receiver's history straight from Home Assistant's **Recorder** (no extra
-storage): pick a **day** (Today, Yesterday, or a specific date) and use the
-**timeline scrubber, play/pause and speed** to watch that day's flights animate —
-breadcrumb trails included. Replay depends on Recorder retention (default
-~10 days) and needs the drones sensor to be recorded; a single history sample
-whose attributes exceed 16 KiB (≈ 60+ simultaneous drones) is dropped by HA. Set
-`show_replay: false` to hide the controls.
+**Live / History.** The card has a **Live** and a **History** mode. History reads
+this receiver's past detections straight from Home Assistant's **Recorder** (no
+extra storage) and lists them newest first, one row per detection, going back up
+to 14 days. Pick a detection to replay it on the map with the **timeline
+scrubber, play/pause and speed** controls, breadcrumb trail included. History
+depends on Recorder retention (default ~10 days) and needs the drones sensor to
+be recorded; a single history sample whose attributes exceed 16 KiB (≈ 60+
+simultaneous drones) is dropped by HA. Set `show_replay: false` to hide the
+controls.
 
 The integration serves the card at `/dars_remote_id/dars-map-card.js` and
 registers it as a frontend module automatically — no `www/` copy, no Lovelace
 resource entry needed. (Hard-refresh the browser once after updating so the new
 card JS is fetched.)
 
-<details><summary>Manual card install (only if you're not using the integration's copy)</summary>
+The map libraries (Leaflet, MapLibre GL JS, maplibre-gl-leaflet) are bundled
+with the integration in `custom_components/dars_remote_id/lib/` and served by
+Home Assistant at `/dars_remote_id/lib/`; nothing is loaded from a public CDN.
+The base-map **tiles** do come from OpenFreeMap (see below), so without internet
+on the viewing browser the map background stays empty and the card falls back
+to the detection list (which always works). Drones without a GPS fix are listed
+but not placed on the map.
 
-Copy **`www/dars-map-card.js`** into `config/www/`, then **Settings → Dashboards →
-⋮ → Resources → + Add Resource** → `/local/dars-map-card.js`, type **JavaScript
-Module**.
-</details>
+## Privacy and network access
 
-The map uses Leaflet + OpenStreetMap loaded from a CDN, so the **browser viewing
-the dashboard needs internet**; if it's offline the card falls back to the
-detection list (which always works). Drones without a GPS fix are listed but not
-placed on the map.
+Detections travel from the receiver to Home Assistant over Bluetooth and stay in
+your Home Assistant. Two optional features make requests to the internet:
+
+- **FAA make/model lookup (Home Assistant server, on by default).** The first
+  time the receiver picks up a drone that broadcasts a serial number, the
+  integration sends that **serial number** to the public FAA UAS Declaration of
+  Compliance database (`https://uasdoc.faa.gov`) to show the drone's declared
+  make and model. One request per new serial, cached afterwards. Nothing else is
+  sent (no location, no receiver or user data). Turn it off in **Settings →
+  Devices & services → D.A.R.S. Drone Remote ID → Configure** → *Look up drone
+  make and model online (FAA)*.
+- **Map tiles (viewing browser).** The map card fetches the base-map style and
+  tiles from OpenFreeMap (`https://tiles.openfreemap.org`), like any web map.
+  Those requests carry the map area being viewed and the browser's IP address,
+  not drone data. Without the map card on a dashboard, no tile requests are
+  made.
 
 ## How it works
 
@@ -135,8 +153,8 @@ reports them, battery and power.
   a Home Assistant dashboard.
 - One receiver drives one BLE connection. Keep it in good range of the HA adapter
   or a Bluetooth proxy.
-- The map tracker follows a single (nearest) drone by design; per‑drone trackers
-  may come later.
+- Besides the *Nearest drone* tracker, each drone that broadcasts a serial
+  number gets its own tracker, available while that drone is being detected.
 
 ## Dashboard & automation examples
 

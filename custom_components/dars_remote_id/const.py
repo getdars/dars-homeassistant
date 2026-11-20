@@ -6,7 +6,7 @@ DOMAIN = "dars_remote_id"
 
 # Bundled Lovelace card that the integration serves + auto-registers on the
 # frontend. Bump when dars-map-card.js changes (used as a cache-busting query).
-CARD_VERSION = "0.9.0"
+CARD_VERSION = "0.10.0"
 CARD_FILENAME = "dars-map-card.js"
 
 # GATT UUIDs — full 128-bit forms of the 16-bit UUIDs the D.A.R.S. firmware exposes.
@@ -28,3 +28,8 @@ STATUS_REFRESH_S = 60.0
 
 # Delay before retrying a dropped/failed BLE connection.
 RECONNECT_S = 10.0
+
+# Option: look up each drone serial's declared make/model in the public FAA UAS
+# Declaration of Compliance database (sends the serial to uasdoc.faa.gov).
+CONF_FAA_LOOKUP = "faa_lookup"
+DEFAULT_FAA_LOOKUP = True

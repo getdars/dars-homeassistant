@@ -3,8 +3,8 @@
  *
  * Renders a live map of every drone reported by the D.A.R.S. integration
  * (reads the `drones` attribute of `sensor.dars_active_drones`). Self-contained
- * vanilla JS — no build step, no HACS: drop this file in `config/www/` and add
- * it as a Lovelace resource (JavaScript Module), then use
+ * vanilla JS, no build step. The D.A.R.S. integration serves it (and the map
+ * libraries it uses, from its lib/ folder) and loads it on the frontend; use
  * `type: custom:dars-map-card` on a dashboard.
  *
  * The card is a viewer only; the D.A.R.S. integration is what connects to the
@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.9.0';
+const DARS_CARD_VERSION = '0.10.0';
 const LEAFLET_VER = '1.9.4';
 // History tab: how far back to list detections, and the gap of absence that
 // splits one drone's samples into a new (separate) detection.
@@ -21,6 +21,11 @@ const DARS_HISTORY_DAYS = 14;
 const DARS_DETECT_GAP_MS = 90 * 1000;
 const MAPLIBRE_VER = '4.7.1';
 const MGL_LEAFLET_VER = '0.0.22';
+// The map libraries above ship inside the integration (lib/) and are served by
+// Home Assistant itself at this path — nothing is loaded from a public CDN.
+const DARS_LIB = '/dars_remote_id/lib';
+const DARS_CSS_LEAFLET = `${DARS_LIB}/leaflet/leaflet.css?v=${LEAFLET_VER}`;
+const DARS_CSS_MAPLIBRE = `${DARS_LIB}/maplibre-gl/maplibre-gl.css?v=${MAPLIBRE_VER}`;
 
 // Base-map styles — the same free-for-commercial OpenFreeMap vector styles the
 // D.A.R.S. Android app uses (no API key). Default Fiord, matching the app.
@@ -81,23 +86,23 @@ function darsLoadScript(src) {
   });
 }
 
-// Load Leaflet + MapLibre GL + the maplibre-gl-leaflet bridge once (CDN, pinned).
-// Needs internet + WebGL on the *viewing* browser; if it fails the card degrades
-// to the detection list. The promise is shared across all cards on the page.
+// Load Leaflet + MapLibre GL + the maplibre-gl-leaflet bridge once, from the
+// copies bundled with the integration. Needs WebGL on the viewing browser; if
+// loading fails the card degrades to the detection list. The promise is shared across all cards on the page.
 function darsLoadMapLibs() {
   if (window.__darsMapLibs) return window.__darsMapLibs;
   window.__darsMapLibs = (async () => {
-    darsAddCss(`https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css`, 'leaflet');
-    darsAddCss(`https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.css`, 'maplibre');
+    darsAddCss(DARS_CSS_LEAFLET, 'leaflet');
+    darsAddCss(DARS_CSS_MAPLIBRE, 'maplibre');
     if (!(window.L && window.L.map)) {
-      await darsLoadScript(`https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.js`);
+      await darsLoadScript(`${DARS_LIB}/leaflet/leaflet.js?v=${LEAFLET_VER}`);
     }
     if (!window.maplibregl) {
-      await darsLoadScript(`https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.js`);
+      await darsLoadScript(`${DARS_LIB}/maplibre-gl/maplibre-gl.js?v=${MAPLIBRE_VER}`);
     }
     if (!(window.L && window.L.maplibreGL)) {
       await darsLoadScript(
-        `https://unpkg.com/@maplibre/maplibre-gl-leaflet@${MGL_LEAFLET_VER}/leaflet-maplibre-gl.js`);
+        `${DARS_LIB}/maplibre-gl-leaflet/leaflet-maplibre-gl.js?v=${MGL_LEAFLET_VER}`);
     }
     if (!window.L || !window.L.maplibreGL) throw new Error('map libraries unavailable');
     return window.L;
@@ -186,8 +191,8 @@ class DarsMapCard extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `
       <!-- Leaflet + MapLibre CSS must live INSIDE the shadow root or the map can't be styled. -->
-      <link rel="stylesheet" href="https://unpkg.com/leaflet@${LEAFLET_VER}/dist/leaflet.css" />
-      <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@${MAPLIBRE_VER}/dist/maplibre-gl.css" />
+      <link rel="stylesheet" href="${DARS_CSS_LEAFLET}" />
+      <link rel="stylesheet" href="${DARS_CSS_MAPLIBRE}" />
       <style>
         :host { --g:#00FF41; --g-dim:#00cc33; --bg:#0d0d0d; --bg2:#020101;
                 --bd:#2a2a2a; --bd-hi:#3a3a3a; --muted:#8a8a8a; --white:#fff; }

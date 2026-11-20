@@ -25,15 +25,19 @@ footer.
   serial number to the manufacturer‑declared make/model. This is public product
   declaration data; it contains **no owner or personal information**. The lookup
   is performed server‑side by the integration (the same flow the D.A.R.S.
-  Android app uses).
+  Android app uses) and sends only the drone's serial number. It can be turned
+  off in the integration's options.
 
-## Software libraries (loaded on the viewing browser, from CDN)
+## Software libraries (bundled in `custom_components/dars_remote_id/lib/`)
+
+Unmodified release builds (only the source-map comment removed), each with its
+licence file next to it.
 
 | Library | Licence | Use |
 | --- | --- | --- |
-| [Leaflet](https://leafletjs.com/) | BSD‑2‑Clause | Map/marker framework for the card |
-| [MapLibre GL JS](https://maplibre.org/) | BSD‑3‑Clause | Renders the OpenFreeMap vector styles |
-| [maplibre-gl-leaflet](https://github.com/maplibre/maplibre-gl-leaflet) | ISC | Bridges MapLibre GL as a Leaflet layer |
+| [Leaflet](https://leafletjs.com/) 1.9.4 | BSD‑2‑Clause | Map/marker framework for the card |
+| [MapLibre GL JS](https://maplibre.org/) 4.7.1 | BSD‑3‑Clause | Renders the OpenFreeMap vector styles |
+| [maplibre-gl-leaflet](https://github.com/maplibre/maplibre-gl-leaflet) 0.0.22 | ISC | Bridges MapLibre GL as a Leaflet layer |
 
 ## Python dependencies
 

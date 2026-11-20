@@ -49,8 +49,12 @@ _LOGGER = logging.getLogger(__name__)
 class DarsCoordinator:
     """Owns the BLE link and the live drone registry for one receiver."""
 
-    def __init__(self, hass: HomeAssistant, address: str, name: str) -> None:
+    def __init__(
+        self, hass: HomeAssistant, address: str, name: str, *, faa_lookup: bool = True
+    ) -> None:
         self.hass = hass
+        # When False, drone serials are never sent to uasdoc.faa.gov.
+        self.faa_lookup = faa_lookup
         self.address = address.upper()
         self.name = name
         self.drones: dict[str, DarsDrone] = {}
@@ -267,9 +271,14 @@ class DarsCoordinator:
         drone.last = now
         apply_message(drone, msg)
         # First time we see a real serial (Basic-ID id_type 1), kick off a
-        # one-shot FAA make/model lookup in the background.
+        # one-shot FAA make/model lookup in the background (if the option is on).
         serial = drone.uas_id
-        if drone.id_type == 1 and serial and serial not in self._faa_seen:
+        if (
+            self.faa_lookup
+            and drone.id_type == 1
+            and serial
+            and serial not in self._faa_seen
+        ):
             self._faa_seen.add(serial)
             self.hass.async_create_task(self._async_faa(serial))
         # Surface a brand-new drone immediately; steady-state refreshes ride the

@@ -19,20 +19,47 @@
       "already_configured": "This receiver is already configured."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "D.A.R.S. options",
+        "description": "The FAA lookup sends the serial number of each drone the receiver picks up to the public FAA UAS Declaration of Compliance database (uasdoc.faa.gov) to show its declared make and model. Turn it off to keep everything on your local network.",
+        "data": {
+          "faa_lookup": "Look up drone make and model online (FAA)"
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
-      "drone_detected": { "name": "Drone detected" },
-      "connected": { "name": "Receiver connected" },
-      "external_power": { "name": "External power" }
+      "drone_detected": {
+        "name": "Drone detected"
+      },
+      "connected": {
+        "name": "Receiver connected"
+      },
+      "external_power": {
+        "name": "External power"
+      }
     },
     "sensor": {
-      "drone_count": { "name": "Active drones" },
-      "nearest_id": { "name": "Nearest drone ID" },
-      "nearest_rssi": { "name": "Nearest drone signal" },
-      "battery": { "name": "Receiver battery" }
+      "drone_count": {
+        "name": "Active drones"
+      },
+      "nearest_id": {
+        "name": "Nearest drone ID"
+      },
+      "nearest_rssi": {
+        "name": "Nearest drone signal"
+      },
+      "battery": {
+        "name": "Receiver battery"
+      }
     },
     "device_tracker": {
-      "nearest_drone": { "name": "Nearest drone" }
+      "nearest_drone": {
+        "name": "Nearest drone"
+      }
     }
   }
 }

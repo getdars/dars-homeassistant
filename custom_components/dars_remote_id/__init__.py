@@ -9,7 +9,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, Platform
 from homeassistant.core import HomeAssistant
 
-from .const import CARD_FILENAME, CARD_VERSION, DOMAIN
+from .const import (
+    CARD_FILENAME,
+    CARD_VERSION,
+    CONF_FAA_LOOKUP,
+    DEFAULT_FAA_LOOKUP,
+    DOMAIN,
+)
 from .coordinator import DarsCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,6 +27,9 @@ PLATFORMS: list[Platform] = [
 ]
 
 _CARD_URL = f"/{DOMAIN}/{CARD_FILENAME}"
+# Map libraries the card uses (Leaflet, MapLibre GL, maplibre-gl-leaflet), bundled
+# in lib/ so the frontend never loads third-party code from a public CDN.
+_LIB_URL = f"/{DOMAIN}/lib"
 _CARD_REGISTERED = f"{DOMAIN}_card_registered"
 
 
@@ -29,12 +38,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_card(hass)
 
     address: str = entry.data[CONF_ADDRESS]
-    coordinator = DarsCoordinator(hass, address, entry.title)
+    faa_lookup: bool = entry.options.get(CONF_FAA_LOOKUP, DEFAULT_FAA_LOOKUP)
+    coordinator = DarsCoordinator(hass, address, entry.title, faa_lookup=faa_lookup)
     await coordinator.async_start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload so a changed option (e.g. the FAA lookup) takes effect."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -62,9 +78,12 @@ async def _async_register_card(hass: HomeAssistant) -> None:
         from homeassistant.components.frontend import add_extra_js_url
         from homeassistant.components.http import StaticPathConfig
 
-        card_path = Path(__file__).parent / CARD_FILENAME
+        base = Path(__file__).parent
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(_CARD_URL, str(card_path), False)]
+            [
+                StaticPathConfig(_CARD_URL, str(base / CARD_FILENAME), False),
+                StaticPathConfig(_LIB_URL, str(base / "lib"), True),
+            ]
         )
         add_extra_js_url(hass, f"{_CARD_URL}?v={CARD_VERSION}")
         _LOGGER.debug("Registered D.A.R.S. map card at %s", _CARD_URL)
