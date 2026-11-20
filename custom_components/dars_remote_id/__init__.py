@@ -39,7 +39,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     address: str = entry.data[CONF_ADDRESS]
     faa_lookup: bool = entry.options.get(CONF_FAA_LOOKUP, DEFAULT_FAA_LOOKUP)
-    coordinator = DarsCoordinator(hass, address, entry.title, faa_lookup=faa_lookup)
+    coordinator = DarsCoordinator(
+        hass, address, entry.title, entry_id=entry.entry_id, faa_lookup=faa_lookup
+    )
     await coordinator.async_start()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

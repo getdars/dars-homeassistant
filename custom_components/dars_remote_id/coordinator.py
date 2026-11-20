@@ -50,9 +50,16 @@ class DarsCoordinator:
     """Owns the BLE link and the live drone registry for one receiver."""
 
     def __init__(
-        self, hass: HomeAssistant, address: str, name: str, *, faa_lookup: bool = True
+        self,
+        hass: HomeAssistant,
+        address: str,
+        name: str,
+        *,
+        entry_id: str,
+        faa_lookup: bool = True,
     ) -> None:
         self.hass = hass
+        self.entry_id = entry_id
         # When False, drone serials are never sent to uasdoc.faa.gov.
         self.faa_lookup = faa_lookup
         self.address = address.upper()
@@ -240,8 +247,16 @@ class DarsCoordinator:
         if model == self._model:
             return
         reg = dr.async_get(self.hass)
-        device = reg.async_get_device(
-            connections={(dr.CONNECTION_BLUETOOTH, self.address)}
+        # This entry's own devices (async_get_device(connections=...) and
+        # registry.devices lookups are deprecated). Runs until the model is set.
+        conn = (dr.CONNECTION_BLUETOOTH, self.address)
+        device = next(
+            (
+                d
+                for d in dr.async_entries_for_config_entry(reg, self.entry_id)
+                if conn in d.connections
+            ),
+            None,
         )
         if device is None:
             return  # entities not registered yet; the next status read retries
