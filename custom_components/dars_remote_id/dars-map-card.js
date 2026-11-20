@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.10.0';
+const DARS_CARD_VERSION = '0.10.1';
 const LEAFLET_VER = '1.9.4';
 // History tab: how far back to list detections, and the gap of absence that
 // splits one drone's samples into a new (separate) detection.
@@ -442,7 +442,11 @@ class DarsMapCard extends HTMLElement {
     this._L = L;
     this._map = L.map(this._el.map, { attributionControl: true, zoomControl: true })
       .setView([this._hass.config.latitude || 0, this._hass.config.longitude || 0], 13);
-    this._map.attributionControl.setPrefix(false);
+    // Credit the map libraries first ("Leaflet | MapLibre"), then the data/tile
+    // attribution the layer adds.
+    this._map.attributionControl.setPrefix(
+      '<a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet</a> | ' +
+      '<a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre</a>');
 
     // Pick the starting style: the viewer's last manual choice (localStorage)
     // wins, then the card's configured default, then Fiord.
