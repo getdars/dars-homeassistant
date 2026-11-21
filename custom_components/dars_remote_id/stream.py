@@ -48,8 +48,9 @@ async def async_open_stream(
     # Imported here so a missing serial package only affects wired entries.
     import serial_asyncio_fast  # noqa: PLC0415
 
-    reader, writer = await serial_asyncio_fast.open_serial_connection(
-        url=target, baudrate=STREAM_BAUD
+    reader, writer = await asyncio.wait_for(
+        serial_asyncio_fast.open_serial_connection(url=target, baudrate=STREAM_BAUD),
+        timeout=10,
     )
     # Leave the ESP32's USB-Serial/JTAG reset lines released. RTS first: the
     # chip resets on RTS asserted with DTR released, so never pass that state.
@@ -61,12 +62,21 @@ async def async_open_stream(
     return reader, writer
 
 
+async def _async_close_writer(writer: asyncio.StreamWriter) -> None:
+    writer.close()
+    with contextlib.suppress(Exception):
+        await asyncio.wait_for(writer.wait_closed(), timeout=2)
+
+
 async def async_probe_stream(
     connection: str, target: str, port: int | None, timeout: float = 6.0
 ) -> bool:
     """Config-flow check: does a D.A.R.S. MAVLink stream arrive here?"""
+    _LOGGER.debug("probe %s %s:%s: opening", connection, target, port)
     reader, writer = await async_open_stream(connection, target, port)
+    _LOGGER.debug("probe %s: opened, waiting for frames", target)
     parser = MavlinkParser()
+    got = 0
     try:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
@@ -77,13 +87,14 @@ async def async_probe_stream(
                 break
             if not data:
                 break
+            got += len(data)
             if parser.feed(data):
+                _LOGGER.debug("probe %s: D.A.R.S. frames found", target)
                 return True
+        _LOGGER.debug("probe %s: no frames (%d bytes read)", target, got)
         return False
     finally:
-        writer.close()
-        with contextlib.suppress(Exception):
-            await writer.wait_closed()
+        await _async_close_writer(writer)
 
 
 class DarsStreamCoordinator(DarsCoordinator):
@@ -147,9 +158,7 @@ class DarsStreamCoordinator(DarsCoordinator):
         was = self.connected
         self.connected = False
         if writer is not None:
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
+            await _async_close_writer(writer)
         if was:
             self._async_notify()
 
