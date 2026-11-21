@@ -302,7 +302,7 @@ class DarsCoordinator:
         self._ingest(*parsed)
 
     @callback
-    def _ingest(self, mac: str, rssi: int, channel: int, msg: bytes) -> None:
+    def _ingest(self, mac: str, rssi: int, channel: int | None, msg: bytes) -> None:
         """Merge one ODID message (from any transport) into the registry."""
         now = time.monotonic()
         drone = self.drones.get(mac)

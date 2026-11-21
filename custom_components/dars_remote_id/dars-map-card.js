@@ -13,7 +13,7 @@
  * © D.A.R.S. — getdars.com
  */
 
-const DARS_CARD_VERSION = '0.10.1';
+const DARS_CARD_VERSION = '0.11.1';
 const LEAFLET_VER = '1.9.4';
 // History tab: how far back to list detections, and the gap of absence that
 // splits one drone's samples into a new (separate) detection.
@@ -46,6 +46,8 @@ const DARS_MAP_ATTR =
   ' · <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a>';
 
 const DARS_UNITS_LS_KEY = 'dars-units';   // 'metric' | 'imperial'
+const DARS_RECEIVER_LS_KEY = 'dars-receiver';   // 'all' | a drones sensor entity_id
+const DARS_ALL = 'all';
 
 function darsSavedStyle() {
   try { return localStorage.getItem(DARS_STYLE_LS_KEY); } catch (e) { return null; }
@@ -55,6 +57,12 @@ function darsSaveStyle(name) {
 }
 function darsSavedUnits() {
   try { return localStorage.getItem(DARS_UNITS_LS_KEY); } catch (e) { return null; }
+}
+function darsSavedReceiver() {
+  try { return localStorage.getItem(DARS_RECEIVER_LS_KEY); } catch (e) { return null; }
+}
+function darsSaveReceiver(v) {
+  try { localStorage.setItem(DARS_RECEIVER_LS_KEY, v); } catch (e) { /* private mode */ }
 }
 function darsSaveUnits(u) {
   try { localStorage.setItem(DARS_UNITS_LS_KEY, u); } catch (e) { /* private mode */ }
@@ -144,7 +152,8 @@ function takeoffIconHtml(color) {
 
 class DarsMapCard extends HTMLElement {
   setConfig(config) {
-    this._entity = (config && config.entity) || 'sensor.dars_active_drones';
+    // Empty / missing entity = show every D.A.R.S. receiver (selectable on the card).
+    this._entity = (config && config.entity) || '';
     // The header already shows a "D.A.R.S." brand chip, so strip a redundant
     // leading "D.A.R.S." (with optional dash) from the title to avoid doubling.
     this._title = (((config && config.title) || 'Drone Map')
@@ -162,7 +171,7 @@ class DarsMapCard extends HTMLElement {
   // Visual editor hooks (HA card UI).
   static getConfigElement() { return document.createElement('dars-map-card-editor'); }
   static getStubConfig() {
-    return { entity: 'sensor.dars_active_drones', title: 'Drone Map', show_takeoff: true, map_style: DARS_MAP_STYLE_DEFAULT };
+    return { title: 'Drone Map', show_takeoff: true, map_style: DARS_MAP_STYLE_DEFAULT };
   }
 
   set hass(hass) {
@@ -214,6 +223,10 @@ class DarsMapCard extends HTMLElement {
                 border-radius:7px; padding:2px 9px; font-size:12px; font-weight:800; cursor:pointer;
                 font-family:'Inter',system-ui,sans-serif; min-width:30px; }
         .unit:hover { color:var(--g); border-color:var(--g-dim); }
+        .rcv { background:#141414; color:var(--muted); border:1px solid var(--bd);
+               border-radius:6px; font:600 11px/1 inherit; padding:4px 6px; max-width:42%;
+               cursor:pointer; }
+        .rcv:hover, .rcv:focus { color:var(--g); border-color:var(--g-dim); outline:none; }
         .badge { font-size:12px; font-weight:800; color:var(--bg2); background:var(--g);
                  border-radius:999px; padding:2px 10px; }
         .badge.zero { background:var(--bd-hi); color:var(--muted); }
@@ -302,6 +315,7 @@ class DarsMapCard extends HTMLElement {
             <span class="brand">D.A.R.S.</span>
             <span class="conn" id="conn" title="Receiver" style="display:none"></span>
             <span class="ttl">${esc(this._title)}</span>
+            <select class="rcv" id="rcv" title="Receiver" hidden></select>
             <button type="button" class="unit" id="unit" title="Toggle units (metric / imperial)">m</button>
             <span class="badge zero" id="count">0</span>
           </div>
@@ -348,7 +362,7 @@ class DarsMapCard extends HTMLElement {
     const $ = (id) => this.shadowRoot.getElementById(id);
     this._el = {
       count: $('count'), warn: $('warn'), map: $('map'), list: $('list'), unit: $('unit'),
-      conn: $('conn'),
+      conn: $('conn'), rcv: $('rcv'),
       ctrls: $('ctrls'), replayBar: $('replay-bar'), detlist: $('detlist'),
       modeLive: $('mode-live'), modeReplay: $('mode-replay'), detBack: $('det-back'),
       play: $('play'), scrub: $('scrub'), speed: $('speed'), tlabel: $('tlabel'),
@@ -359,6 +373,17 @@ class DarsMapCard extends HTMLElement {
     if (savedUnits === 'metric' || savedUnits === 'imperial') this._units = savedUnits;
     this._el.unit.textContent = this._units === 'imperial' ? 'ft' : 'm';
     this._el.unit.addEventListener('click', () => this._toggleUnits());
+
+    // Receiver choice: the viewer's saved choice wins, then the card config.
+    this._receiver = darsSavedReceiver() || this._entity || DARS_ALL;
+    this._el.rcv.addEventListener('change', () => {
+      this._receiver = this._el.rcv.value;
+      darsSaveReceiver(this._receiver);
+      this._sig = null;
+      this._updateConn();
+      if (this._mode === 'replay') this._setMode('replay');   // reload history for it
+      else this._update(true);
+    });
 
     // Replay state.
     this._mode = 'live';
@@ -391,10 +416,70 @@ class DarsMapCard extends HTMLElement {
       });
   }
 
+  // Every D.A.R.S. "active drones" sensor (one per receiver), as
+  // [{id, name}], recognised by its `drones` attribute.
+  _receivers() {
+    const out = [];
+    for (const id in this._hass.states) {
+      if (id.indexOf('sensor.') !== 0) continue;
+      const st = this._hass.states[id];
+      if (!st.attributes || !Array.isArray(st.attributes.drones)) continue;
+      const fn = String(st.attributes.friendly_name || id);
+      const name = fn.replace(/\s*active drones\s*$/i, '').trim() || fn;
+      out.push({ id, name });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out;
+  }
+
+  // The drones sensors currently shown: all receivers, or the chosen one.
+  _selectedIds() {
+    const recs = this._receivers();
+    if (this._receiver !== DARS_ALL && this._hass.states[this._receiver]) return [this._receiver];
+    if (this._receiver !== DARS_ALL && recs.length === 1) return [recs[0].id];
+    return recs.map((r) => r.id);
+  }
+
+  // Keep the header dropdown in step with the receivers that exist.
+  _syncReceiverPicker() {
+    const sel = this._el && this._el.rcv;
+    if (!sel) return;
+    const recs = this._receivers();
+    const key = recs.map((r) => r.id + '=' + r.name).join('|');
+    if (key !== this._rcvKey) {
+      this._rcvKey = key;
+      sel.innerHTML = [`<option value="${DARS_ALL}">All receivers</option>`]
+        .concat(recs.map((r) => `<option value="${esc(r.id)}">${esc(r.name)}</option>`))
+        .join('');
+    }
+    sel.hidden = recs.length < 2;
+    const valid = this._receiver === DARS_ALL || recs.some((r) => r.id === this._receiver);
+    if (!valid) this._receiver = DARS_ALL;
+    sel.value = this._receiver;
+  }
+
+  // Merge drone lists from several receivers: one entry per drone (serial, or
+  // MAC when there is none), keeping the report with the strongest signal.
+  _mergeDrones(lists) {
+    if (lists.length === 1) return lists[0];
+    const best = new Map();
+    for (const list of lists) {
+      for (const d of list) {
+        const k = d.id || d.mac;
+        const prev = best.get(k);
+        if (!prev || (d.rssi != null && (prev.rssi == null || d.rssi > prev.rssi))) best.set(k, d);
+      }
+    }
+    return Array.from(best.values())
+      .sort((a, b) => (b.rssi != null ? b.rssi : -999) - (a.rssi != null ? a.rssi : -999));
+  }
+
   // Resolve which entity to read: the configured one if it exists, otherwise
   // auto-detect the D.A.R.S. "active drones" sensor by its `drones` attribute
   // (its entity_id varies with the device name, e.g. sensor.dars_c5_active_drones).
   _resolveEntity() {
+    const sel = this._selectedIds();
+    if (sel.length) return sel[0];
     if (this._hass.states[this._entity]) return this._entity;
     for (const id in this._hass.states) {
       if (id.indexOf('sensor.') !== 0) continue;
@@ -422,20 +507,42 @@ class DarsMapCard extends HTMLElement {
 
   // Update the header connection dot: green = connected, red = disconnected,
   // grey = unknown; hidden entirely when no connectivity sensor is present.
+  _connFor(eid) {
+    if (eid && eid.indexOf('sensor.') === 0 && eid.endsWith('_active_drones')) {
+      const cand = 'binary_sensor.' + eid.slice('sensor.'.length, -'_active_drones'.length) +
+        '_receiver_connected';
+      if (this._hass.states[cand]) return cand;
+    }
+    return null;
+  }
+
+  // Header dot: green = (any shown) receiver connected, red = none connected,
+  // grey = unknown; hidden when there is no connectivity sensor. The tooltip
+  // lists each receiver when several are shown.
   _updateConn() {
     if (!this._hass || !this._el || !this._el.conn) return;
+    this._syncReceiverPicker();
     const dot = this._el.conn;
-    const cid = this._connEntity();
-    if (!cid) { dot.style.display = 'none'; return; }
+    const ids = this._selectedIds();
+    const names = Object.fromEntries(this._receivers().map((r) => [r.id, r.name]));
+    const states = ids.map((id) => {
+      const cid = this._connFor(id);
+      return { name: names[id] || id, s: cid ? this._hass.states[cid].state : null };
+    }).filter((x) => x.s != null);
+    if (!states.length) {
+      const cid = this._connEntity();
+      if (!cid) { dot.style.display = 'none'; return; }
+      states.push({ name: 'Receiver', s: this._hass.states[cid].state });
+    }
     dot.style.display = '';
-    const s = this._hass.states[cid].state;
-    const connected = s === 'on';
-    const known = s === 'on' || s === 'off';
+    const connected = states.some((x) => x.s === 'on');
+    const known = states.every((x) => x.s === 'on' || x.s === 'off');
     dot.classList.toggle('on', connected);
     dot.classList.toggle('off', known && !connected);
-    dot.title = connected ? 'Receiver connected'
-              : known ? 'Receiver disconnected'
-              : 'Receiver status unknown';
+    const label = (x) => x.s === 'on' ? 'connected' : x.s === 'off' ? 'disconnected' : 'status unknown';
+    dot.title = states.length === 1
+      ? `${states[0].name}: ${label(states[0])}`
+      : states.map((x) => `${x.name}: ${label(x)}`).join('\n');
   }
 
   _initMap(L) {
@@ -514,19 +621,23 @@ class DarsMapCard extends HTMLElement {
   _update(force) {
     if (!this._hass || !this._el) return;
     if (this._mode === 'replay') return;   // replay drives its own rendering
-    const eid = this._resolveEntity();
-    const st = this._hass.states[eid];
-    if (!st) {
-      this._warn(`No D.A.R.S. "active drones" sensor found — is the integration set up? (configured: "${this._entity}")`);
+    this._syncReceiverPicker();
+    const ids = this._selectedIds();
+    const sts = ids.map((id) => this._hass.states[id]).filter(Boolean);
+    if (!sts.length) {
+      this._warn(`No D.A.R.S. "active drones" sensor found — is the integration set up?` +
+        (this._entity ? ` (configured: "${this._entity}")` : ''));
       return;
     }
     this._warn(this._mapWarn || '');   // clear the not-found notice once resolved
-    const drones = Array.isArray(st.attributes.drones) ? st.attributes.drones : [];
+    const drones = this._mergeDrones(
+      sts.map((st) => (Array.isArray(st.attributes.drones) ? st.attributes.drones : [])));
 
     // Skip redundant re-renders (hass fires on every state change). Key off
     // last_updated (not last_changed) so a drone *moving* — an attribute change
     // that leaves the count/state string the same — still re-renders live.
-    const sig = eid + '|' + st.last_updated + '|' + drones.length;
+    const sig = ids.join(',') + '|' + sts.map((st) => st.last_updated).join(',') + '|' +
+      drones.length;
     if (!force && sig === this._sig) return;
     this._sig = sig;
 
@@ -557,7 +668,7 @@ class DarsMapCard extends HTMLElement {
       return `<div class="row" data-mac="${esc(d.mac)}">
           <div class="id" style="color:${this._colorFor(d.mac)}">${id}</div>
           <div class="rssi">${d.rssi != null ? d.rssi + ' dBm' : ''}</div>
-          <div class="meta"><span class="tag">${esc(d.source || '')}</span> ${esc(bits.join(' · '))}</div>
+          <div class="meta">${d.source && d.source !== 'unknown' ? `<span class="tag">${esc(d.source)}</span> ` : ''}${esc(bits.join(' · '))}</div>
           ${modelLine}
         </div>`;
     }).join('');
@@ -679,26 +790,38 @@ class DarsMapCard extends HTMLElement {
   // Fetch the drones sensor's Recorder history for [startDate,endDate] and decode
   // it into [{t, drones}] rows (attributes carry forward when the WS omits `a`).
   async _fetchRows(startDate, endDate) {
-    const eid = this._resolveEntity();
+    const ids = this._selectedIds();
+    if (!ids.length) return [];
     const res = await this._hass.callWS({
       type: 'history/history_during_period',
       start_time: startDate.toISOString(),
       end_time: endDate.toISOString(),
-      entity_ids: [eid],
+      entity_ids: ids,
       minimal_response: false,
       no_attributes: false,
       significant_changes_only: false,
     });
-    const arr = (res && res[eid]) || [];
+    // Decode each receiver's samples, then merge by time: every merged row is
+    // the latest known drone list of each receiver at that moment.
+    const events = [];
+    for (const eid of ids) {
+      let lastAttrs = {};
+      for (const item of (res && res[eid]) || []) {
+        const t = item.lu != null ? item.lu * 1000
+          : (item.last_updated ? Date.parse(item.last_updated) : null);
+        if (t == null) continue;
+        const a = item.a || item.attributes || lastAttrs;
+        lastAttrs = a;
+        events.push({ t, eid, drones: Array.isArray(a.drones) ? a.drones : [] });
+      }
+    }
+    if (ids.length === 1) return events.map((e) => ({ t: e.t, drones: e.drones }));
+    events.sort((a, b) => a.t - b.t);
+    const latest = {};
     const rows = [];
-    let lastAttrs = {};
-    for (const item of arr) {
-      const t = item.lu != null ? item.lu * 1000
-        : (item.last_updated ? Date.parse(item.last_updated) : null);
-      if (t == null) continue;
-      const a = item.a || item.attributes || lastAttrs;
-      lastAttrs = a;
-      rows.push({ t, drones: Array.isArray(a.drones) ? a.drones : [] });
+    for (const e of events) {
+      latest[e.eid] = e.drones;
+      rows.push({ t: e.t, drones: this._mergeDrones(Object.values(latest)) });
     }
     return rows;
   }
@@ -993,7 +1116,7 @@ if (!customElements.get('dars-map-card')) {
 
 // ---- visual editor (uses HA's native ha-form) ---------------------------
 const DARS_EDITOR_SCHEMA = [
-  { name: 'entity', required: true, selector: { entity: { domain: 'sensor' } } },
+  { name: 'entity', selector: { entity: { domain: 'sensor', integration: 'dars_remote_id' } } },
   { name: 'title', selector: { text: {} } },
   { name: 'map_style', selector: { select: { mode: 'dropdown', options: [
     { value: 'Fiord', label: 'Fiord (default)' },
@@ -1010,7 +1133,7 @@ const DARS_EDITOR_SCHEMA = [
   { name: 'show_replay', selector: { boolean: {} } },
 ];
 const DARS_EDITOR_LABELS = {
-  entity: 'Drones entity',
+  entity: 'Receiver (its "Active drones" sensor); leave empty for all receivers',
   title: 'Card title',
   map_style: 'Map style',
   units: 'Units (viewers can also toggle on the card)',

@@ -302,11 +302,12 @@ class MavlinkParser:
         return out
 
 
-def parse_dars_rid(payload: bytes) -> tuple[str, int, int, bytes] | None:
+def parse_dars_rid(payload: bytes) -> tuple[str, int, int | None, bytes] | None:
     """DARS_RID payload -> (mac, rssi, channel, message) like ``parse_frame``.
     MAVLink v2 trims trailing zero bytes, so pad back to full length. The wired
-    feed carries no WiFi channel; it is reported as 0."""
+    feed doesn't say which radio heard the drone, so the channel is None and the
+    drone's source reads "unknown" (not "BLE")."""
     if len(payload) < 8:
         return None
     p = payload.ljust(_DARS_RID_LEN, b"\x00")
-    return mac_str(p, 0), _s8(p[6]), 0, p[8:33]
+    return mac_str(p, 0), _s8(p[6]), None, p[8:33]

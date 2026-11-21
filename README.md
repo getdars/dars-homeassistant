@@ -106,13 +106,20 @@ and Home Assistant is restarted, just add it to a dashboard:
 
 ```yaml
 type: custom:dars-map-card
-entity: sensor.dars_active_drones   # optional (auto-detected if omitted)
+entity: sensor.dars_c5_active_drones  # optional: one receiver; omit for all receivers
 title: Drone Map                    # optional
 map_style: Fiord                    # optional: Fiord | Dark Matter | Positron | Liberty | Bright
 units: metric                       # optional: metric (m, m/s) | imperial (ft, mph)
 show_takeoff: true                  # optional
 show_replay: true                   # optional: show the Live/Replay controls
 ```
+
+**Receivers.** With more than one D.A.R.S. receiver (for example one on
+Bluetooth and one on USB), the card header shows a dropdown: **All receivers**
+merges their detections into one map (a drone seen by several appears once,
+with the strongest signal), or pick a single receiver. Each viewer's choice is
+remembered on that device; `entity` only sets the starting choice. Live view and
+History both follow it.
 
 **Units.** `units` sets the default; each viewer can also flip metric ⇄ imperial
 with the **m / ft** button in the card header (their choice is remembered on that
