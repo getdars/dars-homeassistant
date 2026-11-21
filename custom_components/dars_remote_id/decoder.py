@@ -66,6 +66,9 @@ class DarsDrone:
     last: float = 0.0  # monotonic time of most recent frame
     rssi: int | None = None
     channel: int | None = None
+    # How the data reached Home Assistant when the radio is not known (wired
+    # feeds carry no channel): "USB" or "RS485 (network)".
+    via: str | None = None
     # Basic ID (message type 0)
     uas_id: str | None = None
     id_type: int | None = None
@@ -85,7 +88,7 @@ class DarsDrone:
     @property
     def source(self) -> str:
         if self.channel is None:
-            return "unknown"
+            return self.via or "unknown"
         if self.channel == 0:
             return "BLE"
         if self.channel > 14:

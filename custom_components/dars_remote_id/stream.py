@@ -123,6 +123,9 @@ class DarsStreamCoordinator(DarsCoordinator):
             if connection == CONNECTION_USB
             else "D.A.R.S. receiver (RS485 / network)"
         )
+        # Shown as the drone's "source": the wired feed doesn't say which radio
+        # heard it, so say how it reached Home Assistant instead.
+        self._via = "USB" if connection == CONNECTION_USB else "RS485 (network)"
         self._task: asyncio.Task | None = None
         self._writer: asyncio.StreamWriter | None = None
 
@@ -210,6 +213,9 @@ class DarsStreamCoordinator(DarsCoordinator):
                     continue
                 self._frames_rx += 1
                 self._ingest(*parsed)
+                drone = self.drones.get(parsed[0])
+                if drone is not None:
+                    drone.via = self._via
 
     # ----- no GATT status on a wired feed --------------------------------- #
     async def _async_refresh_status(self) -> None:
