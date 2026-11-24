@@ -19,7 +19,7 @@ Per receiver (one device in HA):
 | Entity | Type | What it is |
 | --- | --- | --- |
 | **Drone detected** | binary_sensor (occupancy) | On while ≥ 1 drone is being detected. Attribute: `count`. |
-| **Active drones** | sensor | Number of drones right now. Attribute `drones`: full list (id, source, RSSI, lat/lon, altitude, height, speed, heading, operator lat/lon). |
+| **Active drones** | sensor | Number of drones right now. Attribute `drones`: full list (id, source, RSSI, lat/lon, altitude, height, speed, heading, operator lat/lon, trust verdict and reasons). |
 | **Nearest drone ID** | sensor | Serial/ID of the strongest‑signal drone. Attributes: that drone's telemetry. |
 | **Nearest drone signal** | sensor (dBm) | RSSI of the strongest drone. |
 | **Nearest drone** | device_tracker | Map marker following the strongest drone (with operator location in attributes). |
@@ -35,6 +35,13 @@ M5Stack ToughC5. Battery and power are re-read once a minute.
 Automation ideas: announce on a speaker when *Drone detected* turns on, flash a
 light, push a phone notification with the nearest drone's ID and distance, or log
 the `drones` attribute to history.
+
+Each drone also carries a **trust verdict** (`trust` and `trust_reasons`
+attributes) computed from its own broadcast stream: `plausible` for a
+well-behaved broadcast, `suspicious` or `spoofed` with machine-readable
+reasons (e.g. clock drift, counter restarts, impossible movement) when
+something is off. Automations can act on it directly, e.g. notify only when a
+drone's `trust` is `suspicious` or `spoofed`.
 
 ## Integration icon
 
