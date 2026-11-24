@@ -36,6 +36,7 @@ from .const import (
 from .decoder import (
     DarsDrone,
     DarsStatus,
+    DroneTrust,
     apply_message,
     is_licensed,
     parse_frame,
@@ -65,6 +66,9 @@ class DarsCoordinator:
         self.address = address.upper()
         self.name = name
         self.drones: dict[str, DarsDrone] = {}
+        # Trust verdicts per drone (remoteid tracker); feeds on every message
+        # in _ingest, for Bluetooth and wired feeds alike.
+        self.trust = DroneTrust()
         self.connected = False
         # Assume licensed until a successful status read says otherwise, so the
         # integration still works if the (open) read is momentarily blocked.
@@ -314,6 +318,9 @@ class DarsCoordinator:
         drone.channel = channel
         drone.last = now
         apply_message(drone, msg)
+        trust = self.trust.ingest(mac, rssi, msg)
+        if trust is not None:
+            drone.trust, drone.trust_reasons = trust
         # First time we see a real serial (Basic-ID id_type 1), kick off a
         # one-shot FAA make/model lookup in the background (if the option is on).
         serial = drone.uas_id

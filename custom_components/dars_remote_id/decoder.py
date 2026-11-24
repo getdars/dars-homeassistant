@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import remoteid
+
 FRAME_LEN = 34
 _MSG_OFF = 8  # offset of the 25-byte ODID message inside a frame
 
@@ -84,6 +86,9 @@ class DarsDrone:
     # System (message type 4)
     op_lat: float | None = None  # operator latitude
     op_lon: float | None = None  # operator longitude
+    # Trust verdict from DroneTrust (None until the first message is judged)
+    trust: str | None = None
+    trust_reasons: list[str] = field(default_factory=list)
 
     @property
     def source(self) -> str:
@@ -110,6 +115,8 @@ class DarsDrone:
             "heading": round(self.heading) if self.heading is not None else None,
             "takeoff_lat": round(self.op_lat, 6) if self.op_lat is not None else None,
             "takeoff_lon": round(self.op_lon, 6) if self.op_lon is not None else None,
+            "trust": self.trust,
+            "trust_reasons": self.trust_reasons,
         }
 
 
@@ -154,6 +161,34 @@ def apply_message(drone: DarsDrone, msg: bytes) -> None:
     elif t == 4:  # System (operator location)
         drone.op_lat = _s32(msg, 2) / 1e7
         drone.op_lon = _s32(msg, 6) / 1e7
+
+
+# --------------------------------------------------------------------------- #
+#  Trust verdicts (remoteid package)
+# --------------------------------------------------------------------------- #
+class DroneTrust:
+    """Trust verdicts for detected drones, from the ``remoteid`` package.
+
+    Every ODID message is fed to a ``remoteid.Tracker`` keyed by transmitter
+    MAC, so a verdict judges the whole message stream of one aircraft (ID
+    format, counter and timestamp continuity, plausible movement) rather than
+    single frames: ``authenticated`` / ``plausible`` / ``suspicious`` /
+    ``spoofed``, with machine-readable reasons.
+    """
+
+    def __init__(self) -> None:
+        self._tracker = remoteid.Tracker()
+
+    def ingest(
+        self, mac: str, rssi: int | None, msg: bytes
+    ) -> tuple[str, list[str]] | None:
+        """Judge one 25-byte ODID message; returns (verdict, reasons), or None
+        when the message is not decodable Remote ID."""
+        try:
+            v = self._tracker.ingest(msg, "payload", address=mac.lower(), rssi=rssi)
+        except ValueError:
+            return None
+        return v.verdict, list(v.reasons)
 
 
 def is_licensed(status: bytes | bytearray) -> bool:
